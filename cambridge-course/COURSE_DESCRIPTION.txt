@@ -1,0 +1,48 @@
+Operating Systems
+
+    Syllabus
+    Course materials
+    Information for supervisors
+
+Principal lecturer: Dr Martin Kleppmann
+Taken by: Part IA CST
+Term: Lent
+Hours: 12
+Format: In-person lectures
+Suggested hours of supervisions: 3
+Prerequisites: Digital Electronics
+This course is a prerequisite for: Cloud Computing, Concurrent and Distributed Systems, Unix Tools
+Exam: Paper 2 Question 3, 4
+Past exam questions, Moodle, timetable
+Aims
+
+The overall aim of this course is to provide a general understanding of the structure and key functions of the operating system. Case studies will be used to illustrate and reinforce fundamental concepts.
+Lectures
+
+    Introduction to operating systems. Elementary computer organisaton. Abstract view of an operating system. Key concepts: layering, multiplexing, performance, caching, buffering, policies versus mechanisms. OS evolution: multi-programming, time-sharing. Booting. [1 lecture]
+    Protection. Dual-mode operation. Protecting CPU, memory, I/O, storage. Kernels, micro-kernels, and modules. System calls. Virtual machines and containers. Subjects and objects. Authentication. Access matrix: ACLs and capabilities. Covert channels. [1 lecture]
+    Processes. Job/process concepts. Process lifecycle. Process management. Context switching. Inter-process communication. [1 lecture]
+    Scheduling. CPU-I/O burst cycle. Scheduling basics: preemption and non-preemption. Scheduling algorithms: FCFS, SJF, SRTF, Priority, and Round Robin. Multilevel scheduling. [2 lectures]
+    Memory management. Processes in memory. Logical versus physical addresses. Partitions: static versus dynamic, free space management, external fragmentation. Segmented memory. Paged memory: concepts, internal fragmentation, page tables. Demand paging/segmentation. Page replacement strategies: FIFO, OPT, and LRU with approximations including NRU, LFU, MFU, MRU. Working set schemes. Thrashing. [3 lectures]
+    I/O subsystem. General structure. Polled mode versus interrupt-driven I/O. Programmed I/O (PIO) versus Direct Memory Access (DMA). Application I/O interface: block and character devices, buffering, blocking, non-blocking, asynchronous, and vectored I/O. Other issues: caching, scheduling, spooling, performance. [1 lecture]
+    File management. File concept. Directory and storage services. File names and metadata. Directory name-space: hierarchies, DAGs, hard and soft links. File operations. Access control. Existence and concurrency control. [1 lecture]
+    Unix case study. History. General structure. Unix file system: file abstraction, directories, mount points, implementation details. Processes: memory image, lifecycle, start of day. The shell: basic operation, commands, standard I/O, redirection, pipes, signals. Character and block I/O. Process scheduling. [2 lectures]
+
+Objectives
+
+At the end of the course students should be able to:
+
+    describe the general structure and purpose of an operating system;
+    explain the concepts of process, address space, and file;
+    compare and contrast various CPU scheduling algorithms;
+    compare and contrast mechanisms involved in memory and storage management;
+    compare and contrast polled, interrupt-driven, and DMA-based access to I/O devices.
+
+Recommended reading
+
+* Silberschatz, A., Galvin, P.C., and Gagne, G. (2018). Operating systems concepts. Wiley (10th ed.). Prior editions, at least back to 8th ed., should also be acceptable.
+Anderson, T. and Dahlin, M. (2014). Operating Systems: Principles and Practice. Recursive Books (2nd ed.).
+Bacon, J. and Harris, T. (2003). Operating systems. Addison-Wesley (3rd ed.). Currently appears out-of-print.
+Leffler, S. (1989). The design and implementation of the 4.3BSD Unix operating system. Addison-Wesley.
+McKusick, M.K., Neville-Neil, G.N. and Watson, R.N.M. (2014) The Design and Implementation of the FreeBSD Operating System. Pearson Education. (2nd ed.).
+

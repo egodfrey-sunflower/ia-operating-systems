@@ -1,0 +1,238 @@
+diff -ruN a/kernel/file.h b/kernel/file.h
+--- a/kernel/file.h	2026-07-05 13:58:26.676498855 +0000
++++ b/kernel/file.h	2026-07-05 13:58:26.830498859 +0000
+@@ -26,7 +26,7 @@
+   short minor;
+   short nlink;
+   uint size;
+-  uint addrs[NDIRECT + 1];
++  uint addrs[NDIRECT + 2];
+ };
+ 
+ // map major device number to device functions.
+diff -ruN a/kernel/fs.c b/kernel/fs.c
+--- a/kernel/fs.c	2026-07-05 13:58:26.676498855 +0000
++++ b/kernel/fs.c	2026-07-05 13:58:26.830498859 +0000
+@@ -398,7 +398,10 @@
+ // The content (data) associated with each inode is stored
+ // in blocks on the disk. The first NDIRECT block numbers
+ // are listed in ip->addrs[].  The next NINDIRECT blocks are
+-// listed in block ip->addrs[NDIRECT].
++// listed in the singly-indirect block ip->addrs[NDIRECT].
++// The final NDINDIRECT blocks are reached through the
++// doubly-indirect block ip->addrs[NDIRECT+1], whose entries
++// each point at a singly-indirect block.
+ 
+ // Return the disk block address of the nth block in inode ip.
+ // If there is no such block, bmap allocates one.
+@@ -421,7 +424,7 @@
+   bn -= NDIRECT;
+ 
+   if (bn < NINDIRECT) {
+-    // Load indirect block, allocating if necessary.
++    // Load singly-indirect block, allocating if necessary.
+     if ((addr = ip->addrs[NDIRECT]) == 0) {
+       addr = balloc(ip->dev);
+       if (addr == 0)
+@@ -440,6 +443,47 @@
+     brelse(bp);
+     return addr;
+   }
++  bn -= NINDIRECT;
++
++  if (bn < NDINDIRECT) {
++    // Doubly-indirect: top block indexes singly-indirect blocks, each of
++    // which indexes NINDIRECT data blocks. Allocate each level as needed.
++    uint idx0 = bn / NINDIRECT; // slot in the doubly-indirect (top) block
++    uint idx1 = bn % NINDIRECT; // slot in the singly-indirect (mid) block
++
++    // Load the doubly-indirect (top) block, allocating if necessary.
++    if ((addr = ip->addrs[NDIRECT + 1]) == 0) {
++      addr = balloc(ip->dev);
++      if (addr == 0)
++        return 0;
++      ip->addrs[NDIRECT + 1] = addr;
++    }
++    bp = bread(ip->dev, addr);
++    a = (uint *)bp->data;
++    if ((addr = a[idx0]) == 0) {
++      addr = balloc(ip->dev);
++      if (addr) {
++        a[idx0] = addr;
++        log_write(bp);
++      }
++    }
++    brelse(bp);
++    if (addr == 0)
++      return 0;
++
++    // Load the singly-indirect (mid) block, allocating if necessary.
++    bp = bread(ip->dev, addr);
++    a = (uint *)bp->data;
++    if ((addr = a[idx1]) == 0) {
++      addr = balloc(ip->dev);
++      if (addr) {
++        a[idx1] = addr;
++        log_write(bp);
++      }
++    }
++    brelse(bp);
++    return addr;
++  }
+ 
+   panic("bmap: out of range");
+ }
+@@ -472,6 +516,28 @@
+     ip->addrs[NDIRECT] = 0;
+   }
+ 
++  if (ip->addrs[NDIRECT + 1]) {
++    struct buf *bp2;
++    uint *a2;
++    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
++    a = (uint *)bp->data;
++    for (i = 0; i < NINDIRECT; i++) {
++      if (a[i] == 0)
++        continue;
++      bp2 = bread(ip->dev, a[i]);
++      a2 = (uint *)bp2->data;
++      for (j = 0; j < NINDIRECT; j++) {
++        if (a2[j])
++          bfree(ip->dev, a2[j]);
++      }
++      brelse(bp2);
++      bfree(ip->dev, a[i]); // free the singly-indirect (mid) block
++    }
++    brelse(bp);
++    bfree(ip->dev, ip->addrs[NDIRECT + 1]); // free the doubly-indirect block
++    ip->addrs[NDIRECT + 1] = 0;
++  }
++
+   ip->size = 0;
+   iupdate(ip);
+ }
+diff -ruN a/kernel/fs.h b/kernel/fs.h
+--- a/kernel/fs.h	2026-07-05 13:58:26.676498855 +0000
++++ b/kernel/fs.h	2026-07-05 13:58:26.830498859 +0000
+@@ -23,9 +23,16 @@
+ 
+ #define FSMAGIC 0x10203040
+ 
+-#define NDIRECT   12
+-#define NINDIRECT (BSIZE / sizeof(uint))
+-#define MAXFILE   (NDIRECT + NINDIRECT)
++// Lab 6, Task 1: rebalanced inode.
++//   NDIRECT    direct block addresses          in addrs[0 .. NDIRECT-1]
++//   1 singly-indirect block                    in addrs[NDIRECT]
++//   1 doubly-indirect block                    in addrs[NDIRECT+1]
++// The total number of addrs[] slots is unchanged (NDIRECT+2 == 13), so the
++// on-disk dinode is the same size as before and IPB is unchanged.
++#define NDIRECT    11
++#define NINDIRECT  (BSIZE / sizeof(uint))
++#define NDINDIRECT (NINDIRECT * NINDIRECT)
++#define MAXFILE    (NDIRECT + NINDIRECT + NDINDIRECT)
+ 
+ // On-disk inode structure
+ struct dinode {
+@@ -34,7 +41,7 @@
+   short minor;             // Minor device number (T_DEVICE only)
+   short nlink;             // Number of links to inode in file system
+   uint size;               // Size of file (bytes)
+-  uint addrs[NDIRECT + 1]; // Data block addresses
++  uint addrs[NDIRECT + 2]; // Data block addresses (direct, indirect, dindirect)
+ };
+ 
+ // Inodes per block.
+diff -ruN a/kernel/syscall.c b/kernel/syscall.c
+--- a/kernel/syscall.c	2026-07-05 13:58:26.793498858 +0000
++++ b/kernel/syscall.c	2026-07-05 13:58:26.830498859 +0000
+@@ -104,8 +104,7 @@
+ extern uint64 sys_close(void);
+ extern uint64 sys_sync(void);
+ extern uint64 sys_crashnow(void);
+-// TASK 2: declare your symlink handler here, wired the way the neighbouring
+-// syscalls are.
++extern uint64 sys_symlink(void);
+ 
+ // An array mapping syscall numbers from syscall.h
+ // to the function that handles the system call.
+@@ -134,8 +133,7 @@
+   [SYS_close]    sys_close,
+   [SYS_sync]     sys_sync,
+   [SYS_crashnow] sys_crashnow,
+-  // TASK 2: register your symlink handler here, the way the neighbouring
+-  // entries are registered.
++  [SYS_symlink]  sys_symlink,
+   // clang-format on
+ };
+ 
+diff -ruN a/kernel/sysfile.c b/kernel/sysfile.c
+--- a/kernel/sysfile.c	2026-07-05 13:58:26.677498855 +0000
++++ b/kernel/sysfile.c	2026-07-05 13:58:26.830498859 +0000
+@@ -328,6 +328,32 @@
+       return -1;
+     }
+     ilock(ip);
++    // Follow symbolic links (unless O_NOFOLLOW). A T_SYMLINK inode stores its
++    // target path as its file contents; resolve it, chasing chains, with a
++    // depth limit so a cycle is refused instead of looping forever.
++    int depth = 0;
++    while (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
++      char target[MAXPATH];
++      int len;
++      if (++depth > 10) { // too many hops: probably a cycle
++        iunlockput(ip);
++        end_op();
++        return -1;
++      }
++      len = readi(ip, 0, (uint64)target, 0, MAXPATH - 1);
++      if (len <= 0) {
++        iunlockput(ip);
++        end_op();
++        return -1;
++      }
++      target[len] = 0;
++      iunlockput(ip); // done with the link inode
++      if ((ip = namei(target)) == 0) {
++        end_op(); // dangling link
++        return -1;
++      }
++      ilock(ip);
++    }
+     if (ip->type == T_DIR && omode != O_RDONLY) {
+       iunlockput(ip);
+       end_op();
+@@ -504,3 +530,33 @@
+   }
+   return 0;
+ }
++
++// Create a symbolic link at `path` that points at `target`.
++// The target path is stored verbatim (no trailing NUL) as the link's
++// file contents; it need not exist (a dangling link is allowed).
++uint64
++sys_symlink(void)
++{
++  char target[MAXPATH], path[MAXPATH];
++  struct inode *ip;
++  int len;
++
++  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
++    return -1;
++
++  begin_op();
++  if ((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
++    end_op();
++    return -1;
++  }
++  // create() returns ip locked; store the target path as its contents.
++  len = strlen(target);
++  if (writei(ip, 0, (uint64)target, 0, len) != len) {
++    iunlockput(ip);
++    end_op();
++    return -1;
++  }
++  iunlockput(ip);
++  end_op();
++  return 0;
++}
