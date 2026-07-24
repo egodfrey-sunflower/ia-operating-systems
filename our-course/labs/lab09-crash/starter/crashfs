@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# crashfs -- Lab 9 Part 2: the unjournaled allocating write.  STARTER.
+#
+#   crashfs mkfs <image>
+#   crashfs workload <image> [crash=<k>]
+#
+# The workload is ONE unprotected create -- file "f", 2 data blocks, block j
+# filled with xv6fs.fill_pattern(1, j) -- issued as exactly five block writes
+# in the handout's fixed order:
+#
+#   W1  the root directory block   (the new entry f -> its inode)
+#   W2  the inode block            (type T_FILE, nlink 1, size 2048, both addrs)
+#   W3  the bitmap block           (both data blocks marked in use)
+#   W4  data block 0
+#   W5  data block 1
+#
+# The xv6fs helpers do the byte-level work; what you write here is the
+# SEQUENCE -- the find_* steps read without writing, and each write_* step
+# issues exactly one block write, so the order they appear below is the order
+# the device sees.  Output contract (fixed): each issued write prints
+# `issue <dirent|inode|bitmap|data> bno=<b>` BEFORE it is issued; completion
+# prints `workload done installs=5`; a crash prints `CRASH installs=<k>` and
+# exits 3 (main() below already handles that).
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import xv6fs                     # noqa: E402
+import blockdev                  # noqa: E402
+
+
+def workload(dev):
+    # TODO (Part 2): the five writes, in the order W1..W5 above.
+    # Useful pieces: xv6fs.find_free_inode, xv6fs.find_free_blocks,
+    # xv6fs.dirent_add, xv6fs.Dinode, xv6fs.write_inode, xv6fs.bitmap_mark,
+    # dev.write_data, xv6fs.fill_pattern.
+    pass
+
+
+def main(argv):
+    if len(argv) < 3:
+        sys.stderr.write("usage: crashfs mkfs|workload <image> [crash=<k>]\n")
+        return 2
+    cmd, image, rest = argv[1], argv[2], argv[3:]
+
+    if cmd == "mkfs":
+        dev = blockdev.BlockDev(image, nblocks=xv6fs.FSSIZE)
+        xv6fs.mkfs(dev)
+        print("mkfs ok size=%d logstart=%d inodestart=%d bmapstart=%d firstdata=%d"
+              % (xv6fs.FSSIZE, xv6fs.LOGSTART, xv6fs.INODESTART,
+                 xv6fs.BMAPSTART, xv6fs.FIRSTDATA))
+        return 0
+
+    if cmd == "workload":
+        crash = None
+        for a in rest:
+            if a.startswith("crash="):
+                crash = int(a.split("=", 1)[1])
+        dev = blockdev.BlockDev(image, crash_after=crash)
+        try:
+            workload(dev)
+            print("workload done installs=%d" % dev.installs)
+        except blockdev.Crash as c:
+            print("CRASH installs=%s" % c.args[0])
+            return 3
+        return 0
+
+    sys.stderr.write("crashfs: unknown command '%s'\n" % cmd)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

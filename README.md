@@ -1,5 +1,7 @@
 # README
-This is a Claude-written version of Cambridge's IA Operating Systems course.
+This is a Claude written CS course, which is:
+- Based on OSTEP (Operating Systems, Ten Easy Pieces)
+- Designed to cover at least the contents of Cambridge's IA Operating Systems course.
 
 - `cambridge-course` contains contents from the original course
 - `our-course` contains a Claude-written version of this course, including exercise sheets and labs

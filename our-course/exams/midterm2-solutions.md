@@ -1,402 +1,413 @@
 > # ⚠️ SPOILER — MODEL ANSWERS AND MARK SCHEME ⚠️
 > ## Do NOT read this until you have sat Midterm 2 under timed conditions.
-> Complete solutions follow. Reading them first throws away your one honest
-> measurement of where you stand. You have been warned.
+> Reading it first destroys the only honest measurement you will get.
 
 ---
 
 # Midterm 2 — Solutions and Mark Scheme
 
-Marking guidance as for Midterm 1: 1 mark ≈ one distinct correct point; full
-method with an arithmetic slip keeps most of the calculation marks; a bare
-number with no working earns at most half.
+General guidance: 1 mark ≈ one distinct made point. Prose parts: a vague
+gesture at the right idea is half a mark, not a mark. Calculation parts: full
+method with an arithmetic slip keeps most marks; a bare correct number earns
+at most half. Derivations asked for "with a one-line reason" earn nothing for
+the number alone.
 
 ---
 
-## Question 1 — Address translation
+## Question 1 — Concurrency
 
-### (a) Splitting the address; the TLB [4 marks]
+### (a) Lu's taxonomy [4 marks]
 
-- Page size 4 KiB ⇒ **offset = 12 bits**. Remaining 30 − 12 = 18 bits split
-  evenly across two levels ⇒ **9 bits per index**. **[2]**
-- Each page table has 2⁹ = 512 entries × 8 bytes = 4096 bytes = exactly one
-  4 KiB page. (This 9-bit/8-byte-PTE indexing is exactly one level of the
-  RISC-V Sv39 scheme xv6 uses in Lab 4.) **[1]**
-- A **TLB** is a small, fast associative cache of recent virtual-page →
-  physical-frame translations. Without it, *every* user memory access would
-  require walking both levels of the table — two extra memory reads per access,
-  i.e. roughly a 3× slowdown on every load and store — which is why the TLB is
-  essential. **[1]**
+- **Atomicity violation:** a code region intended to execute as a unit —
+  typically a check of shared state followed by a use of it — is interleaved
+  by another thread between the two. Sketch: T1 tests `if (p != NULL)`;
+  T2 sets `p = NULL`; T1 dereferences `p`. Each access may even be locked
+  individually; the *pair* is not. **[1.5]**
+- **Order violation:** the code assumes A happens before B but nothing
+  enforces it. Sketch: T1 spawns T2, which uses `state`; T1 initialises
+  `state` *after* the spawn, and T2 occasionally runs first. **[1.5]**
+- Together these covered **97% of the study's 74 non-deadlock bugs**. **[0.5]**
+  Implication: a tool that detects just these two patterns — check/use pairs
+  broken up, and unenforced orderings — addresses nearly all non-deadlock
+  concurrency bugs; exotic bug classes can be ignored at first order. **[0.5]**
 
-### (b) Translation and table space [10 marks]
+### (b) The broken bounded buffer [8 marks]
 
-**(i) Translate 0x004051C0 [4 marks]**
-Split the 30-bit address as (9 bits)(9 bits)(12 bits):
+**(i) [2 marks]** (1) The waits use **`if`, not `while`** — a woken thread
+never rechecks its condition. (2) **One condition variable serves two
+different conditions** ("buffer not full" and "buffer not empty"), so a signal
+can wake the wrong kind of thread. *(Both needed for 2; one earns 1.)*
 
-- offset = low 12 bits = **0x1C0** (= 448)
-- level-2 index = next 9 bits = **5**
-- level-1 index = top 9 bits = **2**
+**(ii) [3 marks]** One producer P, consumers C1 and C2, buffer empty:
 
-(Check: 2×2²¹ + 5×2¹² + 0x1C0 = 4194304 + 20480 + 448 = 4215232 =
-0x004051C0. ✓)
-With the level-2 PTE holding PPN 0x2F3, the physical address is
-(0x2F3 << 12) | 0x1C0 = 0x2F3000 + 0x1C0 = **0x002F31C0**. **[4]** — 1 per
-index/offset, 1 for the physical address.
+1. C1: lock; `count == 0` → `wait` (releases the lock, sleeps). **[½]**
+2. P: lock; buffer not full → `put()`, `count = 1`; `signal` — C1 is moved to
+   ready **but holds nothing and runs later**; P unlocks. **[1]**
+3. C2: acquires the lock first; `count == 1`, so its `if` falls through;
+   `get()` → `count = 0`; signals; unlocks. **[1]**
+4. C1 finally runs: it reacquires the lock and resumes *after* its `wait` —
+   the `if` was already passed, so it calls `get()` with `count == 0`.
+   Underflow. **[½]**
 
-**(ii) Sparse page-table space [4 marks]**
-Each level-1 slot maps a level-2 table covering 512 pages × 4 KiB = **2 MiB**
-of contiguous virtual address space. Count the level-2 tables each region
-forces to exist:
+The staleness moment: between step 2 (told "there is an item") and step 4
+(acting on it) the world changed; with `if`, C1 never looks again.
 
-- 3 MiB at VA 0: spans [0, 3 MiB) → level-1 indices 0 (0–2 MiB) and 1
-  (2–3 MiB) → **2** level-2 tables.
-- 1 MiB shared library at 0x10000000: 0x10000000 >> 21 = index 128; 1 MiB fits
-  inside that one 2 MiB slot → **1** level-2 table.
-- 2-page stack at the very top: top address 0x3FFFFFFF → level-1 index 511 →
-  **1** level-2 table.
+**(iii) [3 marks]** Replace both `if`s with **`while`** loops around the wait
+**[1]**; split the CV into two — producers wait on `empty` and signal `fill`,
+consumers wait on `fill` and signal `empty` (a single CV with `broadcast` is
+also correct, at a wakeup cost) **[1]**. The rule: under **Mesa semantics** a
+signal is a *hint* — it moves a waiter to ready but transfers neither the lock
+nor the truth of the condition; by the time the waiter runs, anything may have
+happened, so waits must re-test in a loop. (Under Hoare semantics the `if`
+would be sound; no mainstream system implements it.) **[1]**
 
-Distinct level-2 tables = {0, 1, 128, 511} = 4, plus the single level-1 table
-= **5 page-table pages** = 5 × 4 KiB = **20 KiB**. **[3]**
-A single-level table would need 2¹⁸ entries × 8 bytes = **2 MiB**, whether or
-not the address space is sparse. The two-level design wins because it only
-materialises level-2 tables for regions that are actually used — a sparse
-address space costs a few pages instead of 2 MiB. **[1]**
+### (c) Semaphores [4 marks]
 
-*Common error:* forgetting that 3 MiB crosses a 2 MiB boundary and so needs two
-level-2 tables, not one.
+`empty` initialised to **MAX** (free slots), `full` to **0** (items),
+`mutex` to **1**. **[1]**
 
-**(iii) Effective access time [2 marks]**
-Hit: 80 ns. Miss: 2 (walk) + 1 (the access) = 3 memory accesses = 240 ns.
-EAT = 0.95 × 80 + 0.05 × 240 = 76 + 12 = **88 ns**. **[2]**
+- `put`: `wait(empty); lock(mutex); add; unlock(mutex); post(full);`
+- `get`: `wait(full); lock(mutex); remove; unlock(mutex); post(empty);` **[1]**
 
-### (c) Inverted page table [6 marks]
+Mutex-first deadlock, buffer empty: consumer takes `mutex`, then waits on
+`full` — sleeping **while holding the mutex**. Producer runs: `wait(empty)`
+succeeds, then blocks on `mutex`. Now the consumer waits for a `post(full)`
+only the producer can perform, and the producer waits for a mutex only the
+consumer holds — a cycle; deadlock. **[2 — interleaving 1, the cycle stated 1]**
 
-**(i) Size [3 marks]** 512 MiB / 4 KiB = 2²⁹ / 2¹² = 2¹⁷ = **131 072 frames**,
-hence 131 072 entries × 8 bytes = 2²⁰ bytes = **1 MiB**. This is fixed by
-physical memory and does **not** grow with the number of processes (one table
-for the whole system). **[3]**
+*Marking note:* the point of the ordering is that `empty`/`full` waits can
+sleep for unbounded time and so must never be inside the mutual-exclusion
+region.
 
-**(ii) Trade-off [3 marks]**
-- Advantage: total size depends on **physical** memory, not on the number or
-  size of virtual address spaces — with many processes or huge sparse address
-  spaces it uses far less memory than one forward table per process. **[1]**
-- Disadvantage: translation is no longer a direct index — you must **search** the
-  table for the entry matching (pid, virtual page), which is slow; and sharing a
-  physical page between address spaces is awkward. **[1]**
-- Mitigation: hash the (pid, VPN) to index the table (a **hashed** inverted page
-  table with collision chains), and rely on the **TLB** to keep the expensive
-  search off the common path. **[1]**
+### (d) Priority inversion [4 marks]
 
----
+**(i) [2 marks]** **Priority inversion.** The scheduler is correct by its own
+lights: H is *blocked* (not runnable), and M is the highest-priority runnable
+thread, so running M is what fixed priorities demand. What it cannot see is
+that **H's progress depends on L** — lock ownership is not scheduler state, so
+the dependency H→L is invisible, and M starves L, which transitively starves
+H.
 
-## Question 2 — Page replacement
+**(ii) [2 marks]** Any two, mechanism + drawback (1 each):
 
-Reference string: `2 3 4 1 4 2 3 5 2 3 4 1 5` (13 references).
-
-### (a) Demand paging and the fault path [4 marks]
-
-- **Demand paging:** pages are not loaded until first referenced; a PTE is marked
-  invalid/not-present until then, and the first access traps as a page fault
-  which the OS services by bringing the page in. **[1]**
-- Steps to service a fault with a free frame available (order matters, ~half a
-  mark each — need the sense of the sequence for [3]):
-  1. Trap to the kernel; save state; check the faulting address is **legal** for
-     this process (else signal/kill).
-  2. Find the page on backing store (swap/file) from the OS's own metadata.
-  3. Grab a **free frame** and schedule the disk read into it; block the process
-     and run something else meanwhile.
-  4. On I/O completion, **update the page table** (set the frame, mark valid,
-     permissions) and the reverse maps.
-  5. **Restart** the faulting instruction; the access now succeeds. **[3]**
-
-### (b) FIFO, Belady, LRU [8 marks]
-
-**(i) FIFO at 3 and 4 frames [4 marks]** (frames shown oldest→newest; ✗ = fault)
-
-3 frames:
-
-| ref  | 2 | 3 | 4 | 1 | 4 | 2 | 3 | 5 | 2 | 3 | 4 | 1 | 5 |
-|------|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|frames| 2 |2,3|2,3,4|3,4,1|3,4,1|4,1,2|1,2,3|2,3,5|2,3,5|2,3,5|3,5,4|5,4,1|5,4,1|
-|fault | ✗ | ✗ | ✗  | ✗  |hit | ✗  | ✗  | ✗  |hit |hit | ✗  | ✗  |hit |
-
-**9 faults.**
-
-4 frames:
-
-| ref  | 2 | 3 | 4 | 1 | 4 | 2 | 3 | 5 | 2 | 3 | 4 | 1 | 5 |
-|------|---|---|---|---|---|---|---|---|---|---|---|---|---|
-|frames| 2 |2,3|2,3,4|2,3,4,1|2,3,4,1|2,3,4,1|2,3,4,1|3,4,1,5|4,1,5,2|1,5,2,3|5,2,3,4|2,3,4,1|3,4,1,5|
-|fault | ✗ | ✗ | ✗  | ✗    |hit   |hit   |hit   | ✗    | ✗    | ✗    | ✗    | ✗    | ✗    |
-
-After the fill, 4 frames hit on 4, 2, 3 — but then page 5 evicts the oldest
-resident (2), and every subsequent reference evicts exactly the page about to
-be needed: 6 consecutive faults. **10 faults.** **[4]** — 2 per correct trace
-and count.
-
-**(ii) Belady's anomaly and LRU [4 marks]**
-Giving FIFO an extra frame *increased* faults from 9 to 10 — this is **Belady's
-anomaly**. **[1]**
-
-LRU on the same string:
-
-- 3 frames: faults on 2,3,4,1 (fill), hit 4, then faults on 2,3,5, hits on 2,3,
-  faults on 4,1,5 → **10 faults**.
-- 4 frames: faults on 2,3,4,1 (fill), hits on 4,2,3, fault on 5 (evicts LRU
-  page 1), hits on 2,3,4, faults on 1,5 → **7 faults**.
-
-More memory helped (10 → 7): LRU shows no anomaly. **[2]**
-The guarantee comes from the **stack property**: for a stack algorithm the set
-of pages resident with *k* frames is always a **subset** of the set resident
-with *k*+1 frames, so any page that is a hit with *k* frames is also a hit with
-*k*+1. LRU (and OPT) have this property; FIFO does not, because eviction order
-depends on load order rather than on a total ordering by recency, so the
-resident sets are not nested. **[1]**
-
-*For reference (not required from the candidate):* on this string **OPT** takes
-8 faults at 3 frames and 6 at 4 (the unbeatable lower bound, and monotone). The
-**clock / second-chance** approximation takes 9 and 10 here — like FIFO it too
-exhibits the anomaly on this string, because every page is re-referenced before
-long, so the use-bits give little discrimination and clock degenerates towards
-FIFO.
-
-### (c) Working set and thrashing [4 marks]
-
-- **Working set** W(t, Δ): the set of distinct pages a process has referenced in
-  the last Δ references (the window). Its size estimates the process's current
-  memory demand / locality. **[1.5]**
-- **Thrashing:** when the total working sets of the running processes exceed
-  physical memory, processes continually evict each other's needed pages, so
-  almost every reference faults; the system spends nearly all its time paging and
-  CPU utilisation collapses. It arises when the **degree of multiprogramming is
-  raised too high** — adding another process pushes total demand over capacity.
-  **[1.5]**
-- Response: **reduce multiprogramming** — suspend/swap out whole processes until
-  the remaining working sets fit (a medium-term scheduler / working-set or
-  page-fault-frequency admission control). **[1]**
-
-### (d) COW fork and replacement [4 marks]
-
-- After a COW `fork`, parent and child **share** the same physical frames
-  read-only, so where eager fork created two copies (two streams of references to
-  two frame sets), COW leaves **one** frame referenced through **two** page
-  tables — the replacement policy now sees a frame that is "hot" from either
-  process, and physical memory pressure is much lower until writes force copies.
-  **[2]**
-- A shared frame must **not** be treated like a private one on eviction. The
-  replacement code must consult the frame's **reference count**: evicting/freeing
-  a frame that still has other references would corrupt the other address space.
-  So the policy may reclaim the physical frame only when the last reference is
-  gone; while shared, "evicting" one mapping means dropping that PTE and
-  decrementing the count, not freeing the frame. **[2]**
-
-*Common error:* saying COW "doubles" the references the policy sees — it is the
-opposite; sharing *reduces* distinct frames until a write triggers a copy.
+- **Priority inheritance:** while L holds a lock that H is blocked on, L runs
+  at H's priority; on release it reverts. Drawback: implementation complexity
+  (inheritance must chase chains of nested locks) and extra work on the
+  lock's slow path.
+- **Priority ceiling** (the Mesa/Lampson–Redell form: each monitor carries the
+  priority of its highest-priority user, and any holder runs at that ceiling):
+  simple and pre-emptive of the problem. Drawback: needs the ceiling known in
+  advance, and elevates L even when no high-priority thread is waiting —
+  unnecessary priority distortion.
+- Also creditable: never share locks across priority levels (restructure);
+  disable preemption during critical sections (drawback: global latency hit);
+  make the shared structure lock-free (drawback: difficulty and limited
+  applicability).
 
 ---
 
-## Question 3 — Input / output
+## Question 2 — I/O and RAID
 
-### (a) Polling vs interrupts vs DMA [4 marks]
+### (a) Bookwork [4 marks]
 
-- **Programmed I/O with polling:** the **CPU** moves the data word-by-word
-  through device registers, and it **busy-waits** (repeatedly reads a status
-  register) until the device is ready. CPU fully occupied. **[1.5]**
-- **Interrupt-driven I/O:** the **CPU** still copies the data word-by-word, but
-  it does *not* busy-wait — it blocks/does other work and the device **raises an
-  interrupt** when ready, at which point the handler transfers the next unit.
-  CPU freed between units but still copies each byte. **[1.5]**
-- **DMA:** a **DMA engine** copies the data between device and memory *without*
-  the CPU; the CPU programs the transfer, does other work, and takes a single
-  interrupt at completion. CPU almost entirely free during the transfer. **[1]**
+**(i) [2]** **Seek** (move the arm), **rotational delay** (wait for the sector
+to come around), **transfer** (read it as it passes). For small random
+requests, **positioning — seek + rotation — dominates**; transfer is
+negligible.
 
-### (b) Control flow and when polling wins [6 marks]
+**(ii) [2]** **Interrupts** when the device is slow relative to a context
+switch (a disk's milliseconds): the CPU does useful work while waiting.
+**Polling** when the device completes faster than (or comparably to) the
+cost of taking an interrupt and switching — spinning briefly is cheaper —
+or when interrupt rates are so high that the system would livelock in
+handlers; a hybrid (interrupt, then poll in batches) is the practical
+compromise.
 
-**(i) Pseudo-code [4 marks]**
+### (b) The disk model [6 marks]
 
-Polling:
+**(i) [1]** One rotation = 60,000 ms / 12,000 = **5 ms**; average rotational
+delay = half a rotation = **2.5 ms**.
 
-```
-read_poll(dev, buf, n):
-    for each unit:
-        start request on dev
-        while (status(dev) != READY)   # busy-wait, burning CPU
-            ;
-        buf[i] = data_register(dev)
-```
+**(ii) [3]** T = seek + rotation + transfer = 3.5 ms + 2.5 ms +
+(4 KB / 100 MB/s = 0.04 ms) ≈ **6.04 ms**. **[2]**
+Throughput = 4 KB / 6.04 ms ≈ **0.68 MB/s**. Positioning dominates: 6 ms of
+the 6.04 — transfer is under 1%. **[1]**
 
-Interrupts:
+**(iii) [2]** T = 3.5 + 2.5 + (100 MB / 100 MB/s = 1,000 ms) = 1,006 ms →
+throughput ≈ **99.4 MB/s** — essentially full bandwidth. Ratio ≈ 99.4 / 0.68 ≈
+**150×, i.e. of order 100×**. **[1]** Justifies any design that turns small
+scattered I/O into large sequential I/O — FFS's rule of placing large files in
+big contiguous chunks so that positioning cost is amortized to a small
+fraction of transfer time (equally acceptable: write buffering to batch
+updates). **[1]**
 
-```
-read_intr(dev, buf, n):
-    start request on dev
-    sleep(current_process)             # block; scheduler runs someone else
+### (c) RAID arithmetic [6 marks]
 
-# elsewhere, on the device interrupt:
-isr(dev):
-    buf[i] = data_register(dev)
-    if more units: start next request
-    else: wakeup(waiting_process)      # unblock the reader
-```
+With N = 6 and per-disk random 4 KB bandwidth R (≈ 0.68 MB/s from (b)):
 
-**[4]** — 2 for the polling busy-wait loop, 2 for the interrupt path clearly
-showing sleep-in-caller / wake-in-ISR.
+| | Capacity | Random read | Random write | Reason |
+|---|---|---|---|---|
+| RAID-0 | **6** disks | **6R** | **6R** | no redundancy; requests spread over all spindles **[1]** |
+| RAID-1 (3 mirrored pairs) | **3** | **6R** | **3R** | a read is served by either copy, so all 6 disks serve reads; a logical write is two physical writes, one per side of a pair → N/2 **[1½]** |
+| RAID-5 | **5** | **6R** | **1.5R** | parity rotates, so all 6 disks hold data and serve reads; a small write = 4 I/Os (read old data + old parity, write new data + new parity), spread evenly → N/4 **[1½]** |
 
-**(ii) When polling is faster [2 marks]** — any two:
-- **Very fast / low-latency devices:** if the device completes in less time than
-  it takes to take an interrupt (save state, run the ISR, return), polling wins —
-  you would spend more on interrupt overhead than on the short spin. **[1]**
-- **High throughput / interrupt storms:** at very high request rates, one
-  interrupt *per* completion swamps the CPU with overhead and cache/pipeline
-  disruption; polling (or hybrid NAPI-style "interrupt then poll") amortises the
-  cost by handling many completions per poll. **[1]** (Also acceptable: when the
-  CPU has nothing else to do anyway, so busy-waiting costs nothing.)
+**RAID-4's wall [2]:** with one dedicated parity disk, *every* small write —
+whichever data disk it lands on — must read and write **that one parity
+disk**: two I/Os there per logical write. The parity disk can do R worth of
+I/Os, so the array completes **R/2** logical writes per second no matter how
+many data disks are added — added spindles add data bandwidth to a bottleneck
+that isn't the data. RAID-5 changes exactly one thing: parity blocks rotate
+across all disks, so the two parity I/Os land on a different disk per stripe
+and the load spreads — giving N/4 · R, which *does* grow with N.
 
-### (c) Disk vs SSD calculation [6 marks]
+*Common wrong answer:* RAID-1 random read as 3R ("half the disks") — reads
+need only one copy, and independent random reads can be steered to either side
+of each mirror, so all six spindles contribute.
 
-**(i) One random 4 KiB block [4 marks]**
-- Disk: seek 6 ms + avg rotational latency (half a revolution at 10 000 RPM =
-  (60 000 ms / 10 000) / 2 = **3 ms**) + transfer (4096 B ÷ 150 MB/s ≈
-  0.027 ms) ≈ **9.03 ms**. Throughput ≈ 1000 / 9.03 ≈ **111 IOPS**. **[2]**
-- SSD: 60 µs latency + transfer (4096 B ÷ 1 GB/s ≈ 4.1 µs) ≈ **64.1 µs ≈
-  0.064 ms**. Throughput ≈ 1000 / 0.0641 ≈ **15 600 IOPS**. **[2]**
-- (The SSD is ~140× faster on random 4 KiB reads — reward the observation.)
+### (d) Choosing a configuration [4 marks]
 
-**(ii) 1 MiB, contiguous vs random [2 marks]**
-- Disk contiguous: one seek + one rotational latency + transfer of 1 MiB
-  (1 048 576 B ÷ 150 MB/s ≈ 6.99 ms) ≈ 6 + 3 + 6.99 ≈ **16.0 ms**. **[0.5]**
-- Disk random (256 separate 4 KiB reads): 256 × 9.03 ms ≈ **2310 ms** — ~145×
-  slower, because each block pays its own seek + rotation. **[1]**
-- The SSD has no mechanical seek or rotation, so its per-request overhead is
-  fixed and tiny; contiguous vs random differ only by whether the controller can
-  pipeline/parallelise across flash chips, so the gap is far smaller (≈ 1.1 ms
-  vs ≈ 16.4 ms here, not 145×). **[0.5]**
-
-### (d) Buffering [4 marks]
-A kernel buffer is a staging area between device and user. Two distinct reasons
-(any two): **(1)** decouple transfer sizes/speeds — the device delivers in
-fixed blocks at its own rate while the application asks for arbitrary amounts;
-**(2)** allow the process to be **descheduled** during the transfer (the device
-can't write into a user page that may be swapped out or whose process isn't
-running); **(3)** enable caching and safe copy semantics (the data is validated
-and stable before the user sees it). **[2]**
-
-- **Read-ahead:** on a sequential read the kernel fetches *further* blocks than
-  asked into the buffer cache before they are requested, so the next `read`
-  hits in the cache — it hides latency for sequential access. **Write-behind
-  (write-back):** a `write` returns as soon as the data is in the buffer cache,
-  and the kernel flushes it to the device later/asynchronously. **[1]**
-- Write-behind's **benefit:** the application isn't blocked on slow device
-  writes, writes can be **batched/coalesced and reordered** for throughput, and
-  data overwritten again soon may never be written at all. Its **risk:**
-  acknowledged data that is not yet on stable storage is **lost on a crash/power
-  failure** (hence `fsync` and journaling) — a durability/consistency hazard the
-  write-through alternative avoids. **[1]**
+- **Configuration P (six-disk RAID-5):** capacity 5 × 4 TB = **20 TB**;
+  random read **6R**; random write 6R/4 = **1.5R** — straight from the (c)
+  table. **[1]**
+- **Configuration Q (two RAID-1 pairs + 2 spares):** the array proper is
+  N = 4, so capacity 2 × 4 TB = **8 TB** — it meets the floor exactly;
+  random read **4R** (either side of each pair serves reads, so all four
+  spindles help); random write 4R/2 = **2R**. The spares add no bandwidth;
+  they shorten the exposure window after a failure. **[1]** Both
+  configurations clear the 8 TB floor, so capacity does not decide.
+- **The deciding quantity:** the fraction of write traffic that is **small
+  and random** rather than large/sequential (equivalently, the full-stripe
+  write fraction). **[1]**
+- **Verdict on each side:** if small random writes dominate, **Q** wins —
+  2R vs 1.5R is a third more write throughput, with no parity
+  read-modify-write in the latency path. If writes arrive as large
+  sequential runs, **P** wins — full-stripe writes compute parity from data
+  in hand and sidestep the small-write penalty entirely, and P carries 2.5×
+  the usable capacity as headroom. **[1]** *Also creditable at the verdict
+  mark:* Q's write advantage is bought with a read cost — 6R falls to 4R —
+  so Q is right only where small random writes genuinely **dominate** the
+  mix, not merely where they are present; a read-heavy workload with some
+  random writes still favours P.
 
 ---
 
-## Question 4 — File systems
+## Question 3 — File systems
 
-Block size 512 B, pointer 4 B ⇒ **128 pointers per indirect block.**
+### (a) Bookwork [4 marks]
 
-### (a) Inode contents and directories [4 marks]
+**(i) [2]** Inode stores (any four, ½ each): file size; type; ownership;
+permissions; timestamps; link count; the block pointers (direct/indirect).
+It does **not** store the file's **name** — names live in directory entries,
+which map name → inode number; a file with two hard links has two names and
+one inode.
 
-- Besides block pointers, an inode holds: file **type** (regular/dir/device/
-  symlink), **size** in bytes, **link count**, **owner/group**, **permission**
-  bits, and **timestamps** (and often the block count). **[2]** (half a mark
-  each, four needed).
-- A **directory is just a file** whose data is a table of (**filename → inode
-  number**) entries. Looking up a name means reading the directory's data blocks
-  and finding the matching entry, which gives the inode number; the inode (not
-  the directory) holds the file's metadata and data-block map. So the name lives
-  in the directory, everything else lives in the inode. **[2]**
+**(ii) [2]** A **hard link** is another directory entry naming the *same
+inode* — after creation the two names are indistinguishable; the file dies
+when the link count reaches zero. A **symbolic link** is a separate small
+file whose content is a *pathname*. Hard links cannot cross file systems (an
+inode number is only meaningful within one) and generally cannot name
+directories (cycle risk); symlinks can do both but can **dangle** — the
+target's removal leaves them pointing at nothing.
 
-### (b) Inode arithmetic [8 marks]
+### (b) Inode arithmetic [10 marks]
 
-**(i) Stock inode [3 marks]** 9 direct + 1 singly-indirect (128 blocks) =
-9 + 128 = **137 blocks** = 137 × 512 = **70 144 bytes = 68.5 KiB**. **[3]**
+Pointers per 4 KB block = 4096 / 8 = **512**.
 
-**(ii) Rebalanced inode [3 marks]** 8 direct + 1 singly-indirect (128) + 1
-doubly-indirect (128 × 128 = 16 384):
-8 + 128 + 16 384 = **16 520 blocks** = 16 520 × 512 = **8 458 240 bytes ≈
-8.07 MiB**. **[3]** (Reward noting the max grew ~120× at the cost of one
-direct slot re-purposed as the doubly-indirect arm — the slot count is
-unchanged at 10, so the on-disk inode size is too.)
+**(i) [4 marks]**
+1. Direct: 12 × 4 KB = **48 KiB**. **[½]**
+2. + single indirect: + 512 × 4 KB = 2 MiB → **2 MiB + 48 KiB**
+   (= 2,146,304 B). **[1]**
+3. + double indirect: + 512² × 4 KB = 512² blocks = 262,144 × 4 KB = **1 GiB**
+   → 1 GiB + 2 MiB + 48 KiB. **[1]**
+4. + triple indirect: + 512³ × 4 KB = **512 GiB** → maximum ≈ **513 GiB**
+   (512 GiB + 1 GiB + 2 MiB + 48 KiB). **[1½]**
 
-**(iii) Reads and the write asymmetry [2 marks]**
-- To read a byte in the doubly-indirect region: read the **top** (doubly-indirect)
-  block, then the **mid** (singly-indirect) block it points to, then the **data**
-  block — **3 block reads** in the worst case (inode already in memory). **[1]**
-- The **first write** to a not-yet-allocated block there costs more because the
-  data block *and possibly the mid indirect block and the top indirect block must
-  be allocated*: `balloc` must consult/update the free-block bitmap and zero and
-  write each newly-created indirect block, whereas a read of an already-allocated
-  block just follows existing pointers. So a first write can touch the bitmap
-  plus one or two indirect blocks plus the data block, all of which must be
-  written out. **[1]**
+**(ii) [3 marks]** (1 each)
+1. Offset 10,000 → block ⌊10,000/4096⌋ = **2** → a direct pointer → **1 read**
+   (the data block).
+2. Offset 5,000,000 → block 1220. Direct covers blocks 0–11, single covers
+   12–523, double covers 524–262,667; 1220 is in the double range → double
+   indirect block, then the second-level indirect block, then data =
+   **3 reads**.
+3. Offset 2³¹ → block 2³¹/2¹² = 2¹⁹ = 524,288 > 262,667 → triple chain:
+   triple indirect, double, single, data = **4 reads**.
 
-### (c) Hard vs soft links [4 marks]
+**(iii) [1 mark]** Every direct byte costs 1 read; every single-indirect byte
+costs 2. So the largest all-bytes-in-≤2-reads file is direct + single
+indirect fully used: **48 KiB + 2 MiB = 2,146,304 bytes**.
 
-For each aspect, the contrast (~1.3 marks each; [4] total):
-- **(i) Where the name→inode mapping lives:** a **hard link** is a directory
-  entry pointing directly at the *same inode number* — the inode's link count is
-  incremented and there is no distinguished "original". A **soft link** is a
-  separate inode of type symlink whose *data* is the target **pathname**;
-  resolution re-walks that path.
-- **(ii) Crossing file systems:** a hard link **cannot** cross a file-system
-  boundary (inode numbers are only meaningful within one file system). A soft
-  link stores a pathname, so it **can** point anywhere, including another device.
-- **(iii) Deleting the target:** removing a name decrements the link count; the
-  file's data survives while **any** hard link remains and is freed only at count
-  zero — so a hard link keeps the file alive. A soft link is unaffected by (and
-  does not keep alive) its target: delete the target and the symlink becomes
-  **dangling** and resolves to an error.
+**(iv) [2 marks]** `/usr/share/dict/words`, cold: root inode, root data,
+`usr` inode, `usr` data, `share` inode, `share` data, `dict` inode, `dict`
+data, `words` inode = **9 reads** to open (an inode read and a data read per
+directory level, then the file's inode — `2(d+1) + 1` with `d = 3`). **[1]**
+Two data blocks per directory: each of the four directory levels (root plus
+`usr`, `share`, `dict`) now costs an inode read plus, in the worst case,
+**both** data blocks — 3 reads per level — and the final inode read is
+unchanged: 4 × 3 + 1 = **13 reads**. Generally **3(d+1) + 1**, and with `b`
+blocks per directory, `(b+1)(d+1) + 1`: directory growth multiplies the
+per-level *data* cost but never the inode cost, so the count scales with
+depth × directory size while the `+1`s stay fixed. **[1]**
 
-### (d) Critique of metadata-in-the-directory-entry (CP/M/FAT style) [4 marks]
+### (c) FFS and the small-file question [6 marks]
 
-Mark scheme: 1 for the genuine simplification, up to 3 for distinct breakages
-(1 each, cap [3] — the strongest answers connect back to part (c)), and the
-final point on what the V7 split buys can substitute for one breakage if
-well made.
+**(i) [3 marks]** The old layout's two seek taxes: (1) **inode ↔ data** —
+inodes clustered at one end of the disk, data sprawled across it, so every
+open-then-read pays a long seek between metadata and content **[1]**; (2)
+**file ↔ related file** — files in the same directory (accessed together)
+scattered arbitrarily, plus data fragmenting over time **[1]**. Cylinder
+groups put a file's inode, its data, and its directory neighbours in the same
+small region. The rule is broken deliberately for **large files**: left in one
+group, a big file would swamp it and destroy locality for everything else, so
+FFS spreads large files in **chunks** across groups — affordable because a
+large-enough chunk amortizes each inter-group seek down to a small fraction of
+its transfer time. **[1]**
 
-- **What it simplifies [1]:** opening a file needs **one** disk read — the
-  directory block yields the name, the permissions, the size, *and* the block
-  map together; there is no separate inode region to allocate, no inode-table
-  seek between the lookup and the data, and no "dangling inode without a name"
-  state for fsck to worry about. For a floppy-era system with no links, this is
-  a real saving.
-- **Hard links become impossible (or incoherent) [1]:** a hard link means **two
-  directory entries naming one file**. If each entry *contains* the metadata,
-  two names mean **two copies** of the size and block pointers with no
-  authoritative one — append via one name and the other name's size and block
-  list are now stale/inconsistent. The **link count** also has nowhere
-  canonical to live, so the system cannot know when the last name is gone and
-  the blocks may be freed. (Part (c)'s semantics simply cannot be implemented.)
-- **Open-but-unlinked files break [1]:** Unix guarantees that a file stays
-  usable by processes that hold it open even after its last name is
-  `unlink`ed — the kernel's file object points at the **inode**, which survives
-  until both the link count and the open count reach zero. If the metadata *is*
-  the directory entry, unlinking destroys the size and block pointers out from
-  under the open file: `fstat` and `read` have nothing to consult. (The classic
-  "write to an unlinked temp file" idiom dies.)
-- **Rename/move across directories gets heavy and non-atomic [1]:** in V7,
-  `mv` between directories is just "add (name, inum) entry here, delete one
-  there" — two small directory edits; the file's identity (the inode) never
-  moves. With embedded metadata the **whole record** (including the block
-  pointers) must be copied from one directory block to another — a multi-write
-  update that is harder to make crash-safe, and any cached/open reference to the
-  old location is invalidated.
-- **What the V7 split buys [1 — may replace one of the above]:** making the
-  directory entry *only* (name → inode number) turns names into cheap,
-  many-to-one references to a **single authoritative record** of the file. That
-  one indirection is what gives: any number of hard links plus a meaningful
-  link count; a stable identity for open files independent of any name; cheap
-  atomic-ish rename; and a fixed-size, separately-allocated inode table that is
-  easy to index, scan, and check (fsck).
+**(ii) [3 marks]** The proposal has it backwards: small files are where
+cylinder-group placement earns the most. Reading a 4 KB file whole is almost
+pure positioning cost — (b) put transfer at under 1% of a small request's
+service time — so the seeks the layout removes (inode ↔ data, file ↔
+directory neighbours) are essentially *all* of this workload's cost. What
+this workload leaves idle is the **large-file exception** — an amortization
+device — not the locality machinery. **[1]** First-free allocation looks
+fine on an empty disk; the bill arrives as the disk fills and churns.
+Related files — one mailbox's messages, delivered over months into whatever
+holes deletion left — end up scattered, inode allocation drifts away from
+data, and a mailbox sweep becomes a random walk of long seeks: exactly the
+aging-driven decay to a few percent of bandwidth that FFS was built to fix.
+**[1]** Verdict: keep the placement logic. The flat layout is fine while
+the file system is mostly empty or short-lived (nothing has fragmented),
+when files are read singly with no inter-file locality to exploit, or when
+a cache in front absorbs nearly all reads — conditions required for the
+mark. **[1]**
 
-*Common wrong answer:* "FAT can't do long filenames / is slow" — irrelevant;
-the question is about *where metadata lives*, and marks are only for
-consequences of that placement.
+---
+
+## Question 4 — Security
+
+### (a) Goals, policy, mechanism [4 marks]
+
+- **Confidentiality** — only authorised parties can read; **integrity** —
+  data/system state changes only as authorised; **availability** — the
+  service remains usable by those entitled to it. **[1½]**
+- **Policy** = *what* is allowed ("students may not read staff files");
+  **mechanism** = *how* the system enforces it (permission bits checked at
+  `open()`, page-table protection, login). The OS ships mechanisms and lets
+  installations express policies over them; conflating the two bakes one
+  policy into the system. Example pair: policy "each user's home directory is
+  private"; mechanism: `rwx` mode bits + UID checks in the kernel. **[2½ —
+  distinction 1½, examples 1]**
+
+### (b) Matrix, projections, Unix bits [8 marks]
+
+**(i) [3 marks]** Matrix (r/w/x; running `deploy` is written x):
+
+| | rel | tape | deploy |
+|---|---|---|---|
+| **dana** | rw | w | x |
+| **omar** | — | rw | x |
+| **mon** | r | — | — |
+
+**ACLs (columns):** rel: {dana: rw, mon: r} · tape: {dana: w, omar: rw} ·
+deploy: {dana: x, omar: x}.
+**C-lists (rows):** dana: {rel: rw, tape: w, deploy: x} · omar: {tape: rw,
+deploy: x} · mon: {rel: r}.
+**[matrix 1, each projection 1]**
+
+**(ii) [2 marks]** (1) Immediate revocation is cheap under **ACLs**: one
+list, attached to `deploy`, delete one entry. Under capabilities the right
+lives with the *subject* (possibly copied, cached, delegated) — the system
+must find or invalidate every outstanding capability. **[1]** (2) The audit
+is cheap under **capability lists**: read omar's row. Under ACLs it requires
+scanning *every object's* list. Structural because each representation
+stores the matrix sliced along one axis only — whichever axis you slice by,
+queries along the other axis require a full scan. **[½]** The setuid caveat:
+omar's row omits `rel`, yet running `deploy` swaps in *dana's* identity —
+and dana holds `rel: r` and `tape: w`, so omar can cause `rel`'s contents to
+land on a tape he may read, despite holding no right to `rel` himself. A
+matrix row records direct rights only; an honest audit must also chase
+programs that switch identity on the subject's behalf. **[½]**
+
+**(iii) [3 marks]**
+1. **Expressible [1]** — by the owner-slot-as-denial trick: make **mon the
+   owner** of `scratch` with owner bits `---`, and give "other" `-w-` (group
+   unused, e.g. also `-w-`). Because the owner class is checked first and is
+   final, mon matches it and gets nothing; every other user falls through to
+   "other" and may write. The 9-bit scheme *can* express "everyone except
+   one named user" — by burning the owner slot on the excluded party.
+
+   *Marking note:* a candidate who notes that **mon can restore its own
+   bits** — an owner may always `chmod` its own file, and mon is an
+   unattended daemon, precisely the principal one worries about — and
+   concludes the policy is *expressible* in the bits but not *enforceable*
+   against mon, has answered better than the model; credit in full.
+2. **Expressible [2]** — and the point is *why*. Under a rights-are-unions
+   reading it looks impossible: probation members are also "users on the
+   system", so any bits that let everyone write would seem to reach them
+   too. But class matching is **first-match-final**, so the group slot can
+   *subtract* rights: owner dana `rw-`, group `probation` with `r--`, other
+   `rw-` — mode `0646`. A probation member matches the group class and
+   stops at `r--`, never seeing other's `w`; every non-member falls through
+   to `rw-`. **[construction 1]** This is the same order-of-check property
+   that (1) exploited in the owner slot, one slot down — the group field
+   used as a *demotion* class, not a grant. And unlike (1)'s trick it *is*
+   enforceable: probation members do not own `worklog`, so they cannot
+   `chmod` their way back in. **[why first-match-final makes it work, 1]**
+   *Marks for the mechanism argument; the bare mode string earns ½ at
+   most. A candidate who answers "impossible" via the union reading has
+   missed exactly the semantics the stem states.*
+
+### (c) Iterated hashing against a deadline [4 marks]
+
+*(The stem supplies the salted baseline: N × D = 10¹¹ hashes, 100 s at
+10⁹ hashes/s. What is examined is the deadline reasoning built on it.)*
+
+**(i) [1]** With `k` iterations per evaluation the full attack takes
+100·k seconds. The deadline is 30 days = 30 × 86,400 ≈ 2.6 × 10⁶ s, so the
+attack misses it once 100·k > 2.6 × 10⁶, i.e. **k > ~26,000 — any round
+figure of order 3 × 10⁴ earns the mark** (working required).
+
+**(ii) [2]** The single-user attack is **N times cheaper** — D·k hashes
+instead of N·D·k. At k = 26,000 it takes 5 × 10⁷ × 26,000 / 10⁹ =
+0.05 × 26,000 ≈ **1,300 s ≈ 22 minutes**: it beats the 30-day deadline by a
+factor of ~2,000. **[1]** To push even one targeted account past the
+deadline, 0.05·k′ > 2.6 × 10⁶ ⟹ **k′ > ~5.2 × 10⁷** — that is, **k′ = N·k**:
+whatever `k` defends the whole file, defending each *individual* account to
+the same deadline costs a further factor of exactly N, because the attacker
+no longer pays the per-user multiplier that salting imposed. A rotation
+policy calibrated to the file-wide attack quietly leaves every single
+account ~N times less protected than it looks. **[1]**
+
+**(iii) [1]** A legitimate login pays `k` **once**: at k = 26,000 that is
+26,000 / 10⁹ ≈ **26 µs** — imperceptible; at k′ = 5.2 × 10⁷ it is
+**52 ms** — noticeable but tolerable, and this is the real ceiling: `k` is
+bounded by login latency the site will accept, not by the attacker. The
+property embodied: a *tunable, deliberately high cost per evaluation* — the
+attacker's 10⁹/s collapses to 10⁹/k. The asymmetry that makes the scheme
+work: the defender pays k once per login; the attacker pays it D times per
+targeted user, N·D times for the file. (Rate-limiting the login prompt is
+irrelevant here — the file is stolen; the attack is offline.)
+
+### (d) The print daemon [4 marks]
+
+Three behaviours; principle + attack + fix (any reasonable minimal fix):
+
+1. **Runs as root → least privilege.** Any bug in the daemon is a
+   root compromise; and as a **confused deputy** it can be pointed at files
+   its caller couldn't read (`submit /etc/shadow`). Fix: run as a dedicated
+   unprivileged user; have users' processes copy the file into the spool
+   under *their own* credentials (or pass an open descriptor), so the daemon
+   never wields root authority on users' behalf. **[1½]**
+2. **Unparsable policy ⇒ allow all → fail-safe defaults.** Corrupting one
+   config file (or a bad deploy) silently disables all quota/permission
+   enforcement — the failure mode is the attacker's friend. Fix: on parse
+   failure, **deny** (queue jobs, alert an operator); errors must fail
+   closed. **[1½]**
+3. **Check at submission, act hours later → complete mediation** (a
+   time-of-check-to-time-of-use gap). A user authorised at submit time may be
+   deauthorised — or the submitted path may be re-pointed at a different
+   file — before printing; the stale decision is honoured. Fix: re-validate
+   at the time of use (or bind the check to the immutable spooled copy rather
+   than to a re-resolvable name). **[1]**
 
 ---
 

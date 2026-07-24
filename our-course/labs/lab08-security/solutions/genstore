@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+# genstore -- Lab 8 Part 1 scaffolding: build a realistic password store.  GIVEN.
+#
+# This is scaffolding, complete and given to you -- you do NOT need to modify it.
+# It registers a population of users whose passwords follow a DOCUMENTED
+# distribution, so the recovery rate your cracker reports is interpretable.  It
+# calls your `pwstore register`, so it exercises your store exactly as a real
+# enrolment would.
+#
+#   genstore <storefile> <wordlist> <scheme> [n=<N>] [seed=<S>] [cost=<C>]
+#
+# The population (documented so CRACK-RESULTS.md's numbers mean something):
+#
+#   * 60%  WEAK      -- a password drawn straight from the wordlist.  These are
+#                       exactly the ones a dictionary attack is meant to find.
+#   * 25%  MODERATE  -- a wordlist word with a digit or two appended (e.g.
+#                       "dragon7").  A plain dictionary attack MISSES these; a
+#                       rule-mangling attack (a stretch goal) would catch some.
+#   * 15%  STRONG    -- 16 random characters.  Not in any wordlist; uncrackable
+#                       by dictionary within any sane budget.
+#
+# So against this store a plain dictionary attack should recover ~60% of the
+# users (the weak fraction) and no more -- that expected recovery rate is the
+# yardstick your CRACK-RESULTS.md compares the measured rate against.  The exact
+# count varies with the seed; the fraction does not.
+
+import os
+import random
+import string
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PWSTORE = os.path.join(HERE, "pwstore")
+
+
+def kv(args, key, default):
+    for a in args:
+        if a.startswith(key + "="):
+            return a.split("=", 1)[1]
+    return default
+
+
+def main(argv):
+    if len(argv) < 4:
+        sys.stderr.write("usage: genstore <storefile> <wordlist> <scheme> "
+                         "[n=N] [seed=S] [cost=C]\n")
+        return 2
+    storefile, wordlist, scheme = argv[1], argv[2], argv[3]
+    n = int(kv(argv[4:], "n", "100"))
+    seed = int(kv(argv[4:], "seed", "1"))
+    cost = kv(argv[4:], "cost", None)
+    rng = random.Random(seed)
+
+    with open(wordlist) as f:
+        words = [w.strip() for w in f if w.strip()]
+
+    # Start from an empty store.
+    try:
+        os.remove(storefile)
+    except FileNotFoundError:
+        pass
+
+    weak = mod = strong = 0
+    for i in range(n):
+        roll = rng.random()
+        if roll < 0.60:
+            pw = rng.choice(words)
+            weak += 1
+        elif roll < 0.85:
+            pw = rng.choice(words) + str(rng.randint(0, 99))
+            mod += 1
+        else:
+            pw = "".join(rng.choice(string.ascii_letters + string.digits)
+                         for _ in range(16))
+            strong += 1
+        cmd = [PWSTORE, "register", storefile, "user%03d" % i, pw, scheme]
+        if cost is not None:
+            cmd.append(cost)
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+
+    sys.stderr.write("genstore: %d users (weak=%d moderate=%d strong=%d) "
+                     "scheme=%s -> %s\n" % (n, weak, mod, strong, scheme, storefile))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

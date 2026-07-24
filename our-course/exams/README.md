@@ -1,149 +1,147 @@
 # Exams
 
-Three sit-down assessments, all closed-book and handwritten (the Tripos is;
-train like you fight). The papers are `midterm1.md`, `midterm2.md` and
-`final.md`, each with a spoilered `-solutions.md` (model answers + mark
-scheme) — do not open a solutions file until you have sat the paper.
+The course's three closed-book assessments, in Cambridge Tripos house style.
+
+| | When | Covers | Format |
+|---|---|---|---|
+| **Midterm 1** | Week 10 | Weeks 1–10 — all of virtualization | 90 min, closed book — [`midterm1.md`](midterm1.md) |
+| **Midterm 2** | Week 20 | Weeks 1–20, emphasis concurrency / persistence / security | 90 min, closed book — [`midterm2.md`](midterm2.md) |
+| **Final** | Week 27 | Everything | 3 h; compulsory Q1 = sealed `y2026p2q3` — [`final.md`](final.md) |
+
+Both midterms sit on clean seams. **Midterm weeks.** Weeks 10 and 20 carry no
+timed past paper; the midterm is that week's timed practice. That is what keeps
+both weeks inside the 12–14 h budget.
+
+## Sealed material — do not open
+
+- `y2026p2q3` — the final's compulsory question
+- `y2026p2q4` — standalone timed mock, week 27
+
+> **Sealed material.** `y2026p2q3` and `y2026p2q4` have never been opened or
+> inspected by anyone. Do not read, extract, or infer their contents.
+
+> **Held back for revision.** `y2023p2q3`, `y2024p2q4`, `y2025p2q4` are
+> deliberately unspent until week 27.
 
 ## Format conventions
 
-Questions follow the Tripos house style: a 20-mark question in 3–5 parts,
-ramping from bookwork ("describe…", ~4 marks) through applied ("calculate the
-response time / translate this address…", ~8 marks) to open-ended design or
-critique ("to what extent would this scheme work?", ~8 marks). Mark scheme
-at 1 mark ≈ 1 minute ≈ one distinct point made.
+Every question on every paper follows the Tripos Paper-2 shape:
 
-## Midterm 1 — after week 6 (90 minutes, 4 questions, answer 3)
+- **20 marks, 3–5 parts, ramping.** Roughly: ~4 marks of bookwork (definitions,
+  mechanism statements — things a prepared candidate writes without thinking),
+  ~8 marks of applied calculation (a trace, a translation, a sizing — the
+  chapter's arithmetic on fresh numbers), and ~8 marks that require judgement
+  (a design to critique, a mechanism to adapt, a proposal to evaluate). The
+  weakest scripts are separated from the strongest almost entirely by the last
+  category.
+- **1 mark ≈ 1 minute ≈ one distinct point.** A 4-mark prose part wants four
+  made points, not one point made four times. A calculation part pays for
+  method: full working with an arithmetic slip keeps most of the marks; a bare
+  correct number earns few.
+- **Timing.** The midterms give 90 minutes for three 20-mark questions —
+  30 minutes a question, the marks-as-minutes rule plus a margin for choosing
+  and checking. The final runs at the course's 35-minutes-per-question
+  convention across four questions.
+- **Conventions are stated, not assumed.** Where a trace depends on a tie-break
+  or queue-ordering rule, the question states it. A different, clearly stated,
+  internally consistent convention earns full marks; an unstated one does not.
 
-Covers weeks 1–6: OS structure, protection, processes, scheduling (IA +
-extension), concurrency I.
+## Midterm 1 — blueprint
 
-Planned question blueprint:
+Four questions, answer **three**. The set spans weeks 1–10; the two most-drilled
+Cambridge calculation families — scheduling traces and address translation —
+each get a full question.
 
-1. **Protection & syscalls** — dual-mode operation bookwork; trace what
-   happens from `read()` in userspace to the driver and back; why can't
-   protection be done in software alone (and what if it must be — SFI).
-2. **Processes** — lifecycle diagram; PCB contents; context-switch cost
-   analysis: what must be saved for a process switch vs a user-level thread
-   switch (ties to Lab 5).
-3. **Scheduling calculation** — given a process table: draw Gantt charts and
-   compute waiting/turnaround/response times under FCFS, SRTF, RR(q=2), and
-   lottery-in-expectation; then MLFQ behaviour of a process that alternates
-   CPU bursts with I/O.
-4. **Concurrency** — identify the race in a given code fragment; fix with a
-   spinlock built from test-and-set; explain when a spinlock is the *wrong*
-   choice and what to use instead.
+- **Q1 — Processes, the process API, and limited direct execution** (ch. 4–6,
+  xv6 ch. 4; Ritchie & Thompson; Ousterhout 1990). Bookwork on the two
+  register-save events of a context switch; an applied `fork()`/`exec()`/`wait()`
+  output-enumeration and the shell-redirection derivation that Ritchie &
+  Thompson use to justify the split; a syscall-overhead calculation feeding an
+  Ousterhout-style critique of "hardware got faster, so OS overhead stopped
+  mattering".
+- **Q2 — Scheduling** (ch. 7–9; Waldspurger & Weihl). The scheduling-trace
+  family: FIFO, STCF and round-robin over a four-job arrival table with
+  turnaround/response/waiting averages, then lottery expectation and a stride
+  trace, closing with an MLFQ design critique (what the priority boost is for,
+  and what deleting it costs).
+- **Q3 — Paging, TLBs, and multi-level tables** (ch. 18–20). The
+  address-translation family: a full two-level walk of a hex address with the
+  physical address of every access, page-table sizing for a sparse address
+  space against the linear alternative, an EAT-with-TLB computation, and a
+  page-size design critique.
+- **Q4 — Memory under pressure** (ch. 17, 21–23; Levy & Lipman). Fragmentation
+  bookwork; a replacement trace (LRU against clock, same string, use-bit
+  convention stated); page-fault-rate algebra with a dirty-eviction refinement;
+  and a paper part on how VAX/VMS approximated LRU on hardware with no
+  reference bit.
 
-## Midterm 2 — after week 11 (90 minutes, 4 questions, answer 3)
+## Midterm 2 — blueprint
 
-Covers weeks 1–11, emphasis on 7–11: memory, virtual memory, I/O, files.
-One question may reach back to midterm-1 material (as Tripos Q3/Q4 mix
-topics).
+Four questions, answer **three**. Weighted toward weeks 11–20 — concurrency,
+persistence, security — with one deliberate reach-back into midterm-1 material,
+as the Tripos Q3/Q4 pair habitually does.
 
-Planned question blueprint:
+- **Q1 — Concurrency** (ch. 26–32; Lu et al.; Lampson & Redell; reaches back to
+  ch. 7–8 scheduling). Lu's bug taxonomy as bookwork; a broken
+  producer/consumer to diagnose and fix (the `if`-versus-`while` and
+  single-CV defects, with interleavings); the semaphore rendering of the same
+  buffer; and priority inversion — a locking bug that is *also* a scheduling
+  bug, tying week 12's locks to week 3–4's schedulers.
+- **Q2 — I/O and RAID** (ch. 36–38; Patterson, Gibson & Katz). The disk
+  service-time model on fresh numbers (random vs sequential, the ratio, and
+  what it justifies); the RAID capacity/reliability/throughput table derived
+  rather than recalled; the RAID-4 small-write bottleneck quantified; a
+  choice between two stated configurations under a capacity floor, decided
+  by a measured property of the workload.
+- **Q3 — File systems** (ch. 39–41; McKusick FFS). The inode-arithmetic family:
+  maximum file size under a stated geometry, reads-to-reach-an-offset through
+  each pointer chain, path-resolution cost with cold and warm caches; then
+  FFS locality reasoning and an is-placement-worth-its-complexity critique
+  on a small-file workload.
+- **Q4 — Security** (ch. 53–55; Saltzer & Schroeder). The access matrix and its
+  two projections on a fresh instance, the revocation asymmetry, Unix 9-bit
+  expressiveness; salting arithmetic (what it costs the attacker, and the
+  hash-stretching factor that pushes the attack past a deadline); a
+  fail-open design to audit against the ch. 53 principles.
 
-1. **Address translation calculation** — given page size, address width and a
-   two-level page table: translate addresses by hand, compute table space
-   for a sparse address space, and the TLB-miss cost; compare against an
-   inverted table.
-2. **Replacement policies** — run a reference string through FIFO, LRU,
-   clock, OPT; exhibit Belady's anomaly; working set and thrashing essay
-   part; why does COW fork (Lab 4) interact with the replacement policy?
-3. **I/O** — polling vs interrupts vs DMA control-flow pseudo-code; when is
-   polling *faster*; buffering strategies; a throughput/latency calculation
-   for a disk vs an SSD.
-4. **File systems** — V7 inode arithmetic (max file size with the Lab 6
-   doubly-indirect extension); hard vs soft links and metadata placement;
-   critique a metadata-in-the-directory-entry design (CP/M/FAT-style, no
-   inode table) — what it simplifies and what it breaks. (The
-   hardlink-snapshot critique in the style of IA sheet 3 Q6(b) is reserved
-   for the final.)
+## Grading bands (midterms)
 
-## Final — after week 17 (the revision week) (3 hours)
+Cambridge classes, translated to a 60-mark script (three questions):
 
-Comprehensive: 7 questions, **Q1 (the sealed Tripos paper y2026p2q3) is
-compulsory** (~35 minutes), plus any three of Q2–Q7 — four answers in total.
-Coverage blocks: (i) Unix & shell internals, (ii) crash consistency,
-(iii) concurrency, (iv) virtualization & kernel architecture, (v) design
-synthesis, (vi) memory & I/O — with Q7 (memory & I/O) guaranteeing the IA
-core is always in the optional pool. CPU scheduling is examined by the two
-midterms (and possibly by the compulsory Q1), not by the final's own
-optional pool. Likewise protection theory (dual-mode operation, syscall
-mechanics, ACLs vs capabilities, covert channels) is examined by Midterm 1,
-and reaches the final only indirectly — via the compulsory Q1 or the essay
-prompts — not as an optional question of its own.
+- **First (≥ 70%, ~42+/60).** Calculations correct with working shown;
+  conventions stated; critique parts deliver a verdict *with the conditions
+  under which it flips*, not a survey. Bookwork is complete and fast enough to
+  leave time for the judgement parts.
+- **2.1 (60–69%).** Methods right throughout with occasional arithmetic slips;
+  bookwork solid; critiques make genuine points but stop short of a committed,
+  conditioned verdict.
+- **2.2 (50–59%).** Bookwork mostly present; calculations started correctly but
+  incomplete or convention-muddled; critique parts restate the chapter instead
+  of judging.
+- **Third (40–49%).** Fragments — definitions without mechanism, traces that
+  lose state partway, critique parts that assert without argument.
 
-Planned question blueprint:
+**Marking yourself honestly.** There is no examiner, which makes the marking
+the most corruptible step. Mark the *script*, not the intention: no marks for
+points you would have made, half-marks at most for a gesture at the right idea,
+and write the per-part marks in the margin as an examiner would. The number is
+only useful if it would survive an audit.
 
-1. **Tripos transplant** — y2026p2q3 (sealed until the exam) as the single
-   compulsory question, ~35 minutes, marked against the real IA standard.
-   (Its sealed partner y2026p2q4 is *not* in this paper — it is sat separately
-   as the week-17 timed standalone mock; see the mock-exam protocol below.)
-2. **Unix case study** — shell internals: given a command line with pipes and
-   redirection, enumerate the exact syscall sequence; signals and process
-   groups; what the versioned-hardlink-snapshot scheme (IA sheet 3 Q6(b))
-   gets right and wrong, and how modern CoW filesystems solve it properly.
-3. **Crash consistency** — order the disk writes for an append under
-   data-journaling vs metadata-journaling ext3; what fsck can and cannot
-   repair; LFS: how reads, writes, and cleaning work, and when it wins/loses
-   vs FFS.
-4. **Concurrency II** — condition variables (diagnose and fix a
-   subtly-wrong signalling discipline); deadlock: the four
-   conditions, an avoidance calculation (banker's-style), and why RCU
-   sidesteps reader-side locking.
-5. **Virtualization** — trap-and-emulate requirements; shadow vs nested page
-   tables (a translation-cost calculation); containers: which kernel
-   mechanisms provide isolation, resource control and the filesystem image,
-   and what a container *cannot* isolate that a VM can.
-6. **Design/synthesis essay** — a choice of two: (A) the "pendulum" essay
-   (functionality swings into the kernel for performance and out for safety —
-   trace it through monolithic Unix, microkernels, exokernels, unikernels,
-   eBPF, and argue where it settles), or (B) design an OS for a specified
-   unusual target (thousands of cores; no MMU; formally-verified control
-   system) justifying each departure from the Unix design. (The
-   microkernel-vs-hypervisor essay lives on sheet 11 as practice; the final
-   deliberately uses fresh prompts.)
-7. **Memory & I/O (IA core)** — TLB/EAT calculation; a replacement or
-   working-set part; a disk-vs-SSD design part — guarantees the IA core in
-   the optional pool with fresh numbers.
+## Mock-exam protocol (midterms)
 
-## Grading bands (all exams)
+1. **Handwritten, closed book, timed.** One sitting, no pauses, no notes, no
+   calculator — the real papers assume none. Put the solutions file somewhere
+   you cannot see it.
+2. **Choose questions like a candidate.** Read all four, commit to three,
+   budget 30 minutes each, and move on when a part stalls — marks-per-minute
+   falls fast on a stuck part.
+3. **Mark it cold, the next day.** Same-day marking is too generous. Use the
+   solutions file's mark scheme part by part, margin-marking as above.
+4. **A question under 60% names a revision target.** Re-work the corresponding
+   exercise-sheet sections closed-book, then re-sit that question from a blank
+   page a few days later. A question re-sat warm proves nothing; the gap is the
+   point.
 
-- 75%+ = comfortable first: applied parts fully correct, design parts show
-  judgement (trade-offs, not just lists).
-- 60–75% = solid: bookwork and calculations correct, design parts thin.
-- 50–60% = passable: targeted revision of the weak questions before moving
-  on.
-- <50%: revisit the corresponding examples sheets before continuing.
-
-## Mock-exam protocol
-
-Before each exam, one full timed dry run using papers you have not seen:
-
-- **Midterm 1** (dry run in week 5): y2016p2q3 and y2017p2q3 — both
-  scheduling (process states and SRTF; the CPU–I/O burst cycle and
-  pre-emption), squarely within weeks 1–5 material.
-- **Midterm 2** (dry run at the end of week 11; the paper itself is sat at
-  the start of week 12): y2017p2q4 and y2016p2q4 — paging/TLB arithmetic and
-  file systems (directory lookup costs, inode arithmetic), matching the
-  paper's weeks 7–11 emphasis.
-- **Final** (week 17): the held-back memory papers y2023p2q3, y2024p2q4 and
-  y2025p2q4, plus the sealed y2026p2q4 as the timed standalone mock. These
-  four are reserved exclusively for week 17 — nothing else assigns them.
-  One honesty note: y2024p2q4's part (d) (emulating referenced/dirty bits
-  via the page-fault handler) is drilled by sheet 6 D(d), so that part
-  measures revision recall rather than fresh performance — weight your
-  self-assessment accordingly.
-
-Mark yourself against the published IA solution notes where available; be
-harsh on prose parts — "would a supervisor accept this sentence as a made
-point?" Recent Tripos OS papers do not reliably have published solutions
-(this includes the final's compulsory Q1): where none exist, self-mark
-against the examiners' report remarks if available, otherwise against this
-course's own grading bands and the relevant sheet answer keys — and mark
-deliberately harshly.
-
-The two sealed y2026 papers serve different purposes: **y2026p2q4** is the
-week-17 timed standalone mock (35 minutes, marked to the IA standard);
-**y2026p2q3** is the final's compulsory Question 1. Open neither before its
-time.
+For the final: all four questions, 35 minutes each, out of 80; the same
+percentage bands apply. Sitting and marking details are in
+[`final.md`](final.md).

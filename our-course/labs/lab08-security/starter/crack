@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+# crack -- Lab 8 Part 1: a dictionary attack on a stolen store.  STARTER.
+#
+#   crack <storefile> <wordlist>
+#
+# Given a store you generated and a wordlist, recover every password that is in
+# the wordlist, and report how much WORK it took.  The work is `hash_ops`: the
+# number of KDF evaluations you perform.  It is the deterministic heart of the
+# salting lesson and does not depend on your hardware:
+#
+#   * Against an UNSALTED store, hash each of the W words ONCE into a
+#     digest->word table, then look every user up for free.  hash_ops = W,
+#     whatever the number of users N.
+#   * Against a SALTED (or slow) store, every user has a different salt, so the
+#     table cannot be shared: re-hash all W words for each of the N users.
+#     hash_ops = W * N.
+#
+# Scan the whole wordlist for each salted user (do not stop at the first hit) so
+# hash_ops is a clean W or W*N regardless of which passwords are present.
+#
+# Wall-clock time is reported too but is only rubric-marked; hash_ops is the
+# number to reason about.  Keep the two output lines below exactly as written.
+
+import hashlib      # noqa: F401
+import sys
+import time
+
+MAX_WORDS = 200000      # cap the wordlist so a stray huge file cannot run away
+
+
+def kdf(scheme, cost, salt, password):
+    """The SAME derivation pwstore uses -- see pwstore's kdf().
+
+    TODO (Part 1): implement the three schemes, identically to pwstore, or the
+    hashes you compute will never match the ones in the store.
+    """
+    _ = (scheme, cost, salt, password)
+    return "0" * 64            # TODO
+
+
+def read_store(path):
+    records = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            user, scheme, cost, salt_hex, hash_hex = line.split()
+            salt = b"" if salt_hex == "-" else bytes.fromhex(salt_hex)
+            records.append({"user": user, "scheme": scheme, "cost": int(cost),
+                            "salt": salt, "hash": hash_hex})
+    return records
+
+
+def load_words(path):
+    words = []
+    with open(path) as f:
+        for line in f:
+            w = line.rstrip("\n")
+            if w:
+                words.append(w)
+            if len(words) >= MAX_WORDS:
+                sys.stderr.write("crack: wordlist capped at %d words\n" % MAX_WORDS)
+                break
+    return words
+
+
+def main(argv):
+    if len(argv) != 3:
+        sys.stderr.write("usage: crack <storefile> <wordlist>\n")
+        return 2
+    records = read_store(argv[1])
+    words = load_words(argv[2])
+    W = len(words)
+
+    cracked = {}        # user -> word
+    hash_ops = 0
+    t0 = time.perf_counter()
+
+    # TODO (Part 1): mount the attack.
+    #   - Split the records into unsalted and salted/slow.
+    #   - Unsalted: build ONE digest->word table (W hashes), then look up each
+    #     unsalted user.  hash_ops += W.
+    #   - Salted/slow: for each such user, hash every word with THAT user's salt
+    #     and cost; on a match, record cracked[user] = word.  hash_ops += W per
+    #     user.  Do not early-exit, so the count stays deterministic.
+
+    dt = time.perf_counter() - t0
+
+    for user in sorted(cracked):
+        print("cracked user=%s password=%s" % (user, cracked[user]))
+    rate = (hash_ops / dt) if dt > 0 else 0.0
+    print("crack recovered=%d users=%d words=%d hash_ops=%d seconds=%.4f rate=%.0f"
+          % (len(cracked), len(records), W, hash_ops, dt, rate))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

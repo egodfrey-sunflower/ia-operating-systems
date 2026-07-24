@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+# sweep -- Lab 9 Parts 2 & 4: the crash campaign driver.  GIVEN CODE, complete.
+#
+#   sweep part2    --xfsck <path/to/xfsck> [--out CRASH-TABLE.md]
+#   sweep data     --xfsck <path> [--dev fifo|reorder] [--out CAMPAIGN.md]
+#   sweep ordered  --xfsck <path> [--dev fifo|reorder]
+#   sweep broken   --xfsck <path>
+#   sweep recovery --xfsck <path>
+#
+# For every crash point in the workload's range it: crashes the tool there,
+# (for the journaled modes) runs recovery, then judges the resulting image by
+# THREE oracles:
+#
+#   structure   -- Lab 7's xfsck must report the image clean;
+#   atomicity   -- the root must hold exactly f1..fm for some m, every one of
+#                  them byte-exact (no partial file, no gap, no garbage);
+#   durability  -- m must cover every transaction the log had committed before
+#                  the crash: at least the pending sequence number the crashed
+#                  image's log header shows, and at least every op whose
+#                  `committed` line the reference (no-crash) run printed at or
+#                  below this install count.
+#
+# `sweep recovery` crashes RECOVERY ITSELF at every point (after first finding
+# a crash point that leaves a committed-but-uncheckpointed transaction), runs
+# recovery again to completion, and applies the same three oracles.
+#
+# `sweep broken` re-runs the data sweep with misorder=commit-first and reports
+# which crash points corrupt -- Part 4 expects you to explain the first one.
+#
+# Build the oracle first:  make -C ../tests/oracle   (or see the handout).
+#
+# The autograder does NOT trust this file; it carries its own independent
+# campaign.  This one exists so you can watch it, argue with it, and write
+# CRASH-TABLE.md / CAMPAIGN.md from its output.
+
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import xv6fs                     # noqa: E402
+
+MAXPOINTS = 200                  # safety cap; the real ranges are ~5-46
+
+
+def run(cmd):
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return p.returncode, p.stdout
+
+
+def committed_installs(out):
+    """{op t: cumulative installs when its `committed` line printed}."""
+    d = {}
+    for line in out.splitlines():
+        if line.startswith("committed "):
+            kv = dict(x.split("=", 1) for x in line.split()[1:])
+            d[int(kv["op"])] = int(kv["installs"])
+    return d
+
+
+def total_installs(out):
+    for line in out.splitlines():
+        if line.startswith("done ") or line.startswith("workload done "):
+            for x in line.split():
+                if x.startswith("installs="):
+                    return int(x.split("=", 1)[1])
+    return None
+
+
+def observed_prefix(img, workload):
+    """-> (m, why).  m = the number of complete, byte-exact files f1..fm the
+    image holds; m = -1 if the image is NOT a clean prefix (why says how)."""
+    rd = xv6fs.ImageReader(img)
+    names = {}
+    for name, inum in rd.root_entries():
+        if name in (".", ".."):
+            continue
+        names[name] = inum
+    want = ["f%d" % t for t, _ in workload]
+    m = 0
+    for t, d in workload:
+        nm = "f%d" % (t,)
+        if nm not in names:
+            break
+        ino = rd.inode(names[nm])
+        if ino.type != xv6fs.T_FILE or ino.nlink != 1:
+            return -1, "%s has type=%d nlink=%d" % (nm, ino.type, ino.nlink)
+        if ino.size != d * xv6fs.BSIZE:
+            return -1, "%s has size=%d, want %d" % (nm, ino.size, d * xv6fs.BSIZE)
+        data = rd.file_bytes(names[nm])
+        for j in range(d):
+            if data[j * xv6fs.BSIZE:(j + 1) * xv6fs.BSIZE] != xv6fs.fill_pattern(t, j):
+                return -1, "%s block %d has wrong contents" % (nm, j)
+        m += 1
+    extra = set(names) - set(want[:m])
+    if extra:
+        return -1, "unexpected root entries %s" % sorted(extra)
+    return m, ""
+
+
+def pending_seq(img):
+    """The sequence number of a committed-but-uncheckpointed transaction the
+    image's log header shows, or 0."""
+    ok, seq, n, _ = xv6fs.ImageReader(img).log_header()
+    return seq if (ok and n > 0) else 0
+
+
+def xfsck_clean(xfsck, img):
+    rc, out = run([xfsck, img])
+    first = out.splitlines()[0] if out else ""
+    return rc == 0 and first == "xfsck: clean", first
+
+
+def campaign(tool, xfsck, mode, devmode, misorder, out_md):
+    workload = [(1, 1), (2, 2), (3, 1), (4, 3)]
+    base = os.path.join(HERE, ".sweep-base.img")
+    img = os.path.join(HERE, ".sweep-run.img")
+    run([tool, "mkfs", base])
+    flags = ["mode=%s" % mode, "dev=%s" % devmode, "misorder=%s" % misorder]
+
+    shutil.copy(base, img)
+    rc, refout = run([tool, "workload", img] + flags)
+    total = total_installs(refout)
+    commits = committed_installs(refout)
+    if total is None:
+        print("sweep: reference (no-crash) run did not print its done line")
+        return 1
+
+    rows, bad = [], 0
+    for i in range(min(total, MAXPOINTS)):
+        shutil.copy(base, img)
+        wrc, wout = run([tool, "workload", img] + flags + ["crash=%d" % i])
+        pend = pending_seq(img)
+        run([tool, "recover", img])
+        clean, first = xfsck_clean(xfsck, img)
+        m, why = observed_prefix(img, workload)
+        need = max(pend, max([t for t, inst in commits.items() if inst <= i],
+                             default=0))
+        verdict = "ok"
+        if wrc != 3 or ("CRASH installs=%d" % i) not in wout:
+            verdict = "BAD no-crash: the device sailed past install %d" % i
+        elif not clean:
+            verdict = "BAD structure: %s" % first
+        elif m < 0:
+            verdict = "BAD atomicity: %s" % why
+        elif m < need:
+            verdict = "BAD durability: %d committed, %d present" % (need, m)
+        if verdict != "ok":
+            bad += 1
+        rows.append((i, m if m >= 0 else "-", verdict))
+        print("point i=%d committed=%s verdict=%s" % (i, rows[-1][1], verdict))
+
+    print("sweep mode=%s dev=%s misorder=%s points=%d ok=%d bad=%d"
+          % (mode, devmode, misorder, len(rows), len(rows) - bad, bad))
+    if out_md:
+        with open(out_md, "w") as f:
+            f.write("| crash point | files present | verdict |\n|---|---|---|\n")
+            for r in rows:
+                f.write("| %s | %s | %s |\n" % r)
+    for p in (base, img):
+        if os.path.exists(p):
+            os.remove(p)
+    return 1 if bad and misorder == "none" else 0
+
+
+def sweep_part2(tool, xfsck, out_md):
+    base = os.path.join(HERE, ".sweep-base.img")
+    img = os.path.join(HERE, ".sweep-run.img")
+    run([tool, "mkfs", base])
+    shutil.copy(base, img)
+    _, refout = run([tool, "workload", img])
+    total = total_installs(refout)
+    if total is None:
+        print("sweep: workload did not print `workload done installs=...`")
+        return 1
+    rows = []
+    for k in range(min(total + 1, MAXPOINTS)):
+        shutil.copy(base, img)
+        run([tool, "workload", img, "crash=%d" % k])
+        rc, out = run([xfsck, img])
+        classes = sorted({ln.split()[1].rstrip(":") for ln in out.splitlines()
+                          if ln.startswith("FAIL ")})
+        verdict = "clean" if rc == 0 else ",".join(classes)
+        rows.append((k, verdict))
+        print("point k=%d xfsck=%s" % (k, verdict))
+    print("sweep mode=part2 points=%d inconsistent=%d"
+          % (len(rows), sum(1 for _, v in rows if v != "clean")))
+    if out_md:
+        with open(out_md, "w") as f:
+            f.write("| crash after k writes | xfsck says |\n|---|---|\n")
+            for r in rows:
+                f.write("| %d | %s |\n" % r)
+    for p in (base, img):
+        if os.path.exists(p):
+            os.remove(p)
+    return 0
+
+
+def sweep_recovery(tool, xfsck):
+    workload = [(1, 1), (2, 2), (3, 1), (4, 3)]
+    base = os.path.join(HERE, ".sweep-base.img")
+    img = os.path.join(HERE, ".sweep-run.img")
+    wrk = os.path.join(HERE, ".sweep-rec.img")
+    run([tool, "mkfs", base])
+
+    # find a crash point whose image holds op 2 committed but uncheckpointed
+    istar = None
+    for i in range(MAXPOINTS):
+        shutil.copy(base, img)
+        run([tool, "workload", img, "crash=%d" % i])
+        if pending_seq(img) == 2:
+            istar = i
+            break
+    if istar is None:
+        print("sweep: found no crash point with a pending committed op 2")
+        return 1
+    _, out = run([tool, "recover", img])          # a full recovery, to size it
+    rtotal = total_installs(out.replace("recover done", "done"))
+    print("recovery sweep: workload crash point i*=%d, recovery installs=%d"
+          % (istar, rtotal))
+
+    bad = 0
+    for j in range(rtotal):
+        shutil.copy(base, wrk)
+        run([tool, "workload", wrk, "crash=%d" % istar])
+        run([tool, "recover", wrk, "crash=%d" % j])     # recovery crashes...
+        run([tool, "recover", wrk])                     # ...and runs again
+        clean, first = xfsck_clean(xfsck, wrk)
+        m, why = observed_prefix(wrk, workload)
+        verdict = "ok"
+        if not clean:
+            verdict = "BAD structure: %s" % first
+        elif m < 0:
+            verdict = "BAD atomicity: %s" % why
+        elif m < 2:
+            verdict = "BAD durability: op 2 was committed, %d present" % m
+        if verdict != "ok":
+            bad += 1
+        print("point j=%d verdict=%s" % (j, verdict))
+    print("sweep mode=recovery points=%d ok=%d bad=%d" % (rtotal, rtotal - bad, bad))
+    for p in (base, img, wrk):
+        if os.path.exists(p):
+            os.remove(p)
+    return 1 if bad else 0
+
+
+def main(argv):
+    if len(argv) < 2:
+        sys.stderr.write(__doc__ or "usage: sweep <mode> --xfsck <path>\n")
+        return 2
+    mode = argv[1]
+    xfsck, devmode, out_md = None, "fifo", None
+    args = argv[2:]
+    while args:
+        a = args.pop(0)
+        if a == "--xfsck":
+            xfsck = args.pop(0)
+        elif a == "--dev":
+            devmode = args.pop(0)
+        elif a == "--out":
+            out_md = args.pop(0)
+    if not xfsck or not os.path.exists(xfsck):
+        sys.stderr.write("sweep: pass --xfsck <path> (build it: make -C ../tests/oracle)\n")
+        return 2
+    xfsck = os.path.abspath(xfsck)
+
+    crashfs = os.path.join(HERE, "crashfs")
+    journal = os.path.join(HERE, "journal")
+    if mode == "part2":
+        return sweep_part2(crashfs, xfsck, out_md)
+    if mode in ("data", "ordered"):
+        return campaign(journal, xfsck, mode, devmode, "none", out_md)
+    if mode == "broken":
+        return campaign(journal, xfsck, "data", "fifo", "commit-first", out_md)
+    if mode == "recovery":
+        return sweep_recovery(journal, xfsck)
+    sys.stderr.write("sweep: unknown mode '%s'\n" % mode)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

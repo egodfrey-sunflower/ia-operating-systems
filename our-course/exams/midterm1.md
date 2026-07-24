@@ -1,215 +1,209 @@
 # Midterm 1 — Operating Systems
 
-**Coverage:** weeks 1–6 (OS structure, protection, processes, scheduling,
-concurrency I).
-**Time:** 90 minutes. **Closed book.**
-**Answer THREE of the four questions.** Each question is worth 20 marks.
-Marks for each part are shown in brackets. Where a calculation is requested,
-show your working: a correct method with an arithmetic slip earns most of the
-marks; a bare number earns few.
+**Coverage:** weeks 1–10 — all of virtualization (OSTEP ch. 1–23, App. F, and
+the assigned cross-readings and papers).
+**Time:** 90 minutes. **Closed book.** No calculator — none of the arithmetic
+needs one.
+**Answer THREE of the four questions.** Each question is worth 20 marks; marks
+for each part are shown in brackets. Where a calculation is requested, show
+your working: a correct method with an arithmetic slip earns most of the marks;
+a bare number earns few. Where a trace depends on a convention, use the one
+stated.
 
 ---
 
-## Question 1 — Protection and system calls
+## Question 1 — Processes, the process API, and limited direct execution
 
-A modern operating system relies on hardware **dual-mode operation** to protect
-itself and other processes from a buggy or malicious program.
+*(a)* During a timer interrupt that leads to a context switch from process A to
+process B, registers are saved **twice**, by two different agents, into two
+different places. Say what is saved each time, by what, and into what — and
+state why the timer interrupt is the piece of this machinery the OS cannot do
+without. **[4 marks]**
 
-*(a)* Describe dual-mode operation. Your answer should explain what
-distinguishes user mode from kernel (supervisor) mode, give **two** examples of
-operations the hardware forbids in user mode, and state how the CPU knows which
-mode it is in. **[4 marks]**
+*(b)* The process API separates process creation into `fork()` and `exec()`.
 
-*(b)* A user program calls the C library function `read(fd, buf, n)` to read
-`n` bytes from an open file into `buf`. Trace, in order, the sequence of events
-from the moment the program invokes `read()` until control returns to the
-instruction after the call. Your trace should mention: the transition into the
-kernel and how the arguments and the call number are conveyed; how the kernel
-validates the request; the role of the device driver and of the disk
-controller's interrupt; what the calling process does while the data is being
-fetched; and how execution and the return value are delivered back to user
-mode. **[8 marks]**
-
-*(c)* A colleague argues that hardware protection is unnecessary: "a sufficiently
-clever compiler and a trusted loader could guarantee that no program ever
-executes a privileged instruction or touches memory it does not own, so we could
-run everything in a single address space in kernel mode and save the cost of the
-trap on every system call."
-
-  (i) Give **two** reasons why protection cannot, in general, be achieved by
-  compilation and static checking alone on conventional hardware. **[4 marks]**
-
-  (ii) Suppose you nevertheless *must* run an untrusted native-code module in
-  the kernel's single address space, with **no** hardware protection available
-  for it. You may transform the module's machine code with a compiler or
-  binary rewriter before it runs, and you may reject code you cannot make
-  safe. **Propose** a scheme that confines the module's loads, stores, and
-  jumps to a designated "sandbox" region of memory. Say what your tool inserts
-  or checks, how you prevent the module simply jumping *past* your inserted
-  checks, and what run-time cost your scheme imposes and where that cost
-  falls. Finally, give **one** situation in which this software-only
-  confinement would genuinely be preferable to putting the module in its own
-  process. Marks are for a coherent, defensible design, not for naming any
-  published system. **[4 marks]**
-
----
-
-## Question 2 — Processes and context switching
-
-*(a)* Draw the process state-transition diagram for a pre-emptively scheduled
-operating system. Label every state and every transition, and for each
-transition name the event that causes it. **[4 marks]**
-
-*(b)* List **six** distinct items of information the kernel must keep in a
-process control block (PCB), and for each say in one phrase why it is needed.
-**[3 marks]**
-
-*(c)* A *process* context switch and a *user-level thread* context switch have
-very different costs.
-
-  (i) State precisely what must be saved, restored, or changed on a switch
-  between two **processes** that is *not* required on a switch between two
-  **user-level threads of the same process**. Name at least three such items and
-  explain why each is unnecessary for the user-level thread switch. **[5 marks]**
-
-  (ii) On a particular machine a full process context switch costs 6 µs
-  (including the indirect cost of the cache and TLB misses that follow it),
-  whereas a user-level thread switch costs 0.1 µs. A server performs 50 000
-  context switches per second. Calculate the fraction of CPU time consumed by
-  switching under each scheme. **[3 marks]**
-
-*(d)* Given your answer to (c), a user-level thread library looks strictly
-better. State **two** important things a pure user-level threading package
-*cannot* do that kernel threads (or processes) can, and explain the consequence
-of each for a program that is (i) I/O-bound and (ii) running on a multi-core
-machine. **[5 marks]**
-
----
-
-## Question 3 — Scheduling
-
-Four processes arrive at a single CPU with the arrival times and CPU-burst
-lengths below (all times in abstract units). No process performs I/O in parts
-(a)–(c). Assume context-switch overhead is zero, and that when two processes are
-otherwise tied the lower-numbered process is preferred.
-
-| Process | Arrival time | CPU burst |
-|---------|-------------:|----------:|
-| P1      | 0            | 9         |
-| P2      | 1            | 5         |
-| P3      | 3            | 2         |
-| P4      | 7            | 3         |
-
-*(a)* Define **turnaround time**, **waiting time**, and **response time** for a
-process, and state which one a scheduler for an interactive system should try
-hardest to minimise, and why. **[3 marks]**
-
-*(b)* For **each** of the following policies, draw a Gantt chart of the schedule
-and compute the average turnaround time, the average waiting time, and the
-average response time over the four processes:
-
-  (i) First-Come-First-Served (FCFS);
-
-  (ii) Shortest-Remaining-Time-First (SRTF, i.e. pre-emptive SJF);
-
-  (iii) Round-Robin with a time quantum of 2 units (RR, q = 2). When a running
-  process is pre-empted at the same instant that another process arrives, place
-  the newly-arrived process on the ready queue **before** the pre-empted one.
-
-Comment briefly on which policy is best for turnaround time and why SRTF
-achieves it. **[8 marks]**
-
-*(c)* Instead of the table above, suppose three permanently CPU-bound processes
-A, B, C are scheduled by a **lottery scheduler** holding a fresh lottery before
-every quantum. A holds 6 tickets, B holds 3, and C holds 1.
-
-  (i) State the expected fraction of the CPU each process receives, and hence
-  the expected number of quanta each runs out of the next 100. **[2 marks]**
-
-  (ii) State the expected number of lotteries held **up to and including** the
-  one C first wins, and the weakness of lottery scheduling this exposes compared
-  with a deterministic proportional-share scheduler such as stride scheduling.
-  **[1 mark]**
-
-*(d)* A multi-level feedback queue (MLFQ) has three levels Q0 (highest), Q1, Q2
-with round-robin time quanta of **2, 4, and 8** ticks respectively. The rules
-are: a new process starts in Q0; a process that uses a **full** quantum at its
-level is demoted one level (Q2 is the bottom); a process that **blocks
-voluntarily before** using its quantum stays at its level (its partial-quantum
-count is reset); a periodic boost returns every process to Q0 every 100 ticks.
-
-Process **H** is CPU-bound and never blocks. Process **L** is interactive: each
-time it is scheduled it runs for exactly 1 tick and then blocks for I/O.
-Starting with both in Q0 on one CPU, state which queue each process settles in
-and explain briefly why L consistently gets excellent response time even though
-H never yields. **[2 marks]**
-
-*(e)* Three periodic **real-time** tasks run on one CPU. Task *i* has
-worst-case compute time *Cᵢ* and period *Tᵢ*, and each job's deadline is the
-end of its period:
-
-| Task | Cᵢ | Tᵢ |
-|------|---:|---:|
-| T1   | 2  | 5  |
-| T2   | 2  | 8  |
-| T3   | 2  | 10 |
-
-  (i) Compute the total utilisation *U* = Σ *Cᵢ*/*Tᵢ* and test it against the
-  Liu–Layland bound for **rate-monotonic** (RM) scheduling of three tasks,
-  *U* ≤ 3(2^(1/3) − 1) ≈ 0.780. State precisely what the outcome of this test
-  does — and does **not** — tell you about whether RM will meet all deadlines
-  for this set. **[2 marks]**
-
-  (ii) For the same task set, state what **EDF** (earliest-deadline-first)
-  guarantees, and explain why EDF's utilisation bound is exactly 1 while the
-  static-priority RM bound is lower. **[2 marks]**
-
----
-
-## Question 4 — Concurrency
-
-Two threads share a bank account. `balance` is a global integer initialised to
-100. Each thread runs the following C fragment once, concurrently, on a
-multiprocessor with no locking:
+  (i) Consider this program (error handling omitted; `fork()` succeeds):
 
 ```c
-void withdraw(int amount) {
-    int b = balance;      // (1) read
-    if (b >= amount) {    // (2) test
-        b = b - amount;   // (3) compute
-        balance = b;      // (4) write back
+int main(void) {
+    printf("A\n");
+    if (fork() == 0) {
+        printf("B\n");
+        if (fork() == 0)
+            printf("C\n");
     }
+    printf("D\n");
+    return 0;
 }
 ```
 
-Thread T1 calls `withdraw(80)`; thread T2 calls `withdraw(80)`.
+  How many processes run in total, and exactly which lines does each print?
+  State, with a one-line justification each, whether the output line `D` can
+  ever appear **before** `B`, and whether `C` can ever appear before `B`.
+  Assume each `printf` is atomic, and that `stdout` is line-buffered —
+  output goes to a terminal, not a file. **[4 marks]**
 
-*(a)* Define **race condition** and **critical section**, and state the four
-conditions a correct mutual-exclusion mechanism must satisfy (mutual exclusion
-plus three others). **[4 marks]**
+  (ii) Show how a shell uses `fork()`, `exec()` and `wait()` to run the command
+  `wc < in.txt > out.txt`, saying in which process each step happens and how
+  the redirections are arranged. Then make the argument — the one Ritchie and
+  Thompson make about their own design — for why creation and program-loading
+  being *separate* calls is exactly what makes this clean. What would a
+  combined `spawn("wc", ...)` call have to grow instead? **[4 marks]**
 
-*(b)* (i) Give a specific interleaving of the numbered statements above that
-produces an **outcome** — the pair of returned results together with the final
-`balance` — that should have been impossible: **both** withdrawals succeed.
-State the final balance your interleaving produces. **[3 marks]**
+*(c)* A server core runs at 2 GHz. Each request it serves makes **8** system
+calls, and each system call costs **3,000 cycles** of pure kernel-crossing
+overhead — trap entry, dispatch, return, and the cache and TLB pollution that
+follows — independent of the useful work done inside the kernel.
 
-  (ii) The hardware provides an atomic `test_and_set(lock)` that sets `*lock` to
-  1 and returns its *previous* value. Using it, write a `spin_lock()` and
-  `spin_unlock()`, and show exactly where you would place the calls in
-  `withdraw()` to remove the race. **[5 marks]**
+  (i) At 50,000 requests per second, what fraction of the core is consumed by
+  kernel-crossing overhead alone? Show your working, and state what request
+  rate this overhead alone would cap the core at if the requests did nothing
+  else. **[4 marks]**
 
-*(c)* Spinlocks are not always the right tool.
+  (ii) A colleague waves this away: "CPUs are a thousand times faster than in
+  1990 — Ousterhout's worry about operating-system overhead is a museum piece."
+  Using Ousterhout's actual thesis about *why* OS performance failed to track
+  processor speed, argue where your colleague is wrong — and then state the
+  class of workload for which the colleague is, in practice, right. A verdict
+  without conditions earns half. **[4 marks]**
 
-  (i) Explain why a spinlock is a poor choice for guarding a critical section
-  that may block or run for a long time, **and** why it is a poor choice on a
-  **single**-core machine in particular. State what synchronisation primitive
-  you would use instead in each case and how it avoids the problem. **[4 marks]**
+---
 
-  (ii) In Lab 5 (weeks 10–12) you will meet the stock xv6 physical-memory
-  allocator, which guards one global free list with a **single** spinlock; on a
-  multi-core machine this lock becomes heavily contended. The lock is correct —
-  so what exactly is the cost of the contention, and what design change removes
-  most of it without changing the lock's semantics? **[4 marks]**
+## Question 2 — Scheduling
+
+Four jobs arrive at a single CPU. No job performs I/O; context-switch overhead
+is zero. **Convention:** when two jobs are otherwise tied, the job that arrived
+earlier is preferred; under round-robin, a job that arrives at the same instant
+another is preempted joins the ready queue **before** the preempted one.
+
+| Job | Arrival | Length |
+|-----|--------:|-------:|
+| A   | 0       | 8      |
+| B   | 2       | 4      |
+| C   | 4       | 1      |
+| D   | 5       | 2      |
+
+*(a)* Define **turnaround time** and **response time**, and name a policy that
+is provably optimal for average turnaround (jobs arriving together) and a
+policy designed to optimise response. One sentence on why no single policy
+wins both. **[3 marks]**
+
+*(b)* For each of (i) **FIFO**, (ii) **STCF** (preemptive
+shortest-time-to-completion-first), and (iii) **round-robin with quantum 2**,
+draw the schedule and compute the average turnaround time and average response
+time over the four jobs. For STCF, point out each preemption decision as you
+make it; for RR, keep the ready queue explicitly. **[9 marks]**
+
+*(c)* Three CPU-bound jobs hold lottery tickets: A 100, B 50, C 250.
+
+  (i) Give each job's expected CPU share, and its expected number of quanta out
+  of the next 80. Why are these figures only expectations — and what happens to
+  the deviation from them as the jobs run longer? **[2 marks]**
+
+  (ii) Under **stride scheduling** with stride constant 10,000, compute each
+  job's stride, then trace the scheduler until all pass values are next equal
+  (ties broken alphabetically), listing who runs at each quantum. Confirm the
+  resulting counts match the ticket ratios. **[2 marks]**
+
+*(d)* An engineer maintaining an MLFQ scheduler proposes deleting the periodic
+priority boost: "Rule 4 already charges jobs for their full allotment whether
+they block or not, so gaming is solved, and the boost just lets CPU hogs
+periodically stall my interactive queue." Evaluate the proposal: say precisely
+which problem the boost solves that Rule 4 does not, construct the workload
+that the boost-less scheduler mishandles, and state the (real) condition under
+which the engineer's configuration would nonetheless be acceptable.
+**[4 marks]**
+
+---
+
+## Question 3 — Paging, TLBs, and multi-level tables
+
+A 32-bit machine has 4 KB pages and 4-byte PTEs. It uses a **two-level** page
+table: the top 10 bits of a virtual address index the page directory, the next
+10 bits index a page of the page table, and PTEs and page-directory entries
+hold a 20-bit PFN plus flag bits.
+
+*(a)* (i) Relative to the linear page table it replaces, state the problem the
+two-level structure solves and the new cost it introduces. Under what property
+of real address spaces does the trade pay? **[2 marks]**
+
+  (ii) Name **four** flag bits found in a typical PTE and give one phrase each
+  on what the hardware or OS uses them for. **[2 marks]**
+
+*(b)* The page-directory base register holds physical address `0x10000`. Entry
+1 of the page directory is valid with PFN `0x023`; entry 2 of that second-level
+page is valid with PFN `0x080`.
+
+  (i) Translate virtual address `0x004025A8`: show the split of the address
+  into its three fields (give each field's value), the **physical address of
+  each page-table access** the hardware makes, and the final physical address.
+  **[5 marks]**
+
+  (ii) A process maps two regions, each aligned to a 4 MB boundary: 8 MB of
+  code+heap at the bottom of the address space and a 4 MB stack region at the
+  top. How much memory do its page tables occupy in total? Compare with the
+  linear table for the same machine, and state the ratio. **[3 marks]**
+
+  (iii) The TLB is probed in 2 ns and memory access takes 60 ns; the TLB hits
+  98% of the time; on a miss the full walk is performed with no caching of
+  page-table contents. Compute the effective access time of a load. State the
+  formula before the numbers. **[2 marks]**
+
+*(c)* The architects propose doubling the page size to 8 KB, keeping everything
+else fixed: "the page table halves, TLB reach doubles, and page faults move
+twice the data per fault — strictly better." Evaluate: quantify the first two
+claims for this machine (a 64-entry TLB), name what the proposal costs and
+**where in the workload** that cost lands, and give the workload conditions
+under which you would and would not take the trade. **[6 marks]**
+
+---
+
+## Question 4 — Memory under pressure
+
+*(a)* Define **internal** and **external** fragmentation. State which of the
+two paging eliminates and which it retains (and where the retained one shows
+up). Then one phrase each: why must a free-list allocator **coalesce**, and
+what repeated cost does a **slab/segregated-list** cache remove for objects of
+a fixed size? **[4 marks]**
+
+*(b)* A process has **3 frames**, initially empty, and references virtual pages:
+
+```
+0  1  2  0  3  1  4  2  1  3
+```
+
+  (i) Trace **LRU**: for each reference give hit or miss, the eviction if any,
+  and the resulting frame contents. State the total miss count. **[3 marks]**
+
+  (ii) Trace the **clock algorithm** with one use bit per page, under exactly
+  this convention: pages are loaded with use bit = 1; a hit sets the use bit
+  to 1; on a miss the hand examines frames in fill order, starting where it
+  last stopped — a use bit of 1 is cleared and the hand advances, a use bit of
+  0 selects the victim, and after replacement the hand advances one frame.
+  Give the trace and the miss count. **[4 marks]**
+
+  (iii) Compare your two traces: where do the policies part company, and what
+  information does LRU hold that the use bit throws away? **[1 mark]**
+
+*(c)* A machine has a 100 ns memory access time and a page-fault service time
+of 10 ms when the fault only needs to read the incoming page.
+
+  (i) What is the maximum page-fault rate that keeps the effective access time
+  at or below 200 ns? State your EAT formula and any approximation you make.
+  **[2 marks]**
+
+  (ii) Measurement then shows that **30%** of faults must first write back a
+  dirty victim, costing an additional 10 ms before the read. At the fault rate
+  from (i), what is the effective access time now? **[2 marks]**
+
+*(d)* The VAX-11 provided **no reference bit**. Describe the replacement design
+VMS shipped instead — the per-process resident-set policy and the global
+second-chance lists — and explain how their combination approximates LRU
+despite the missing hardware, including which faults complete with no disk I/O
+at all. Close with a judgement: name one respect in which this design is
+actually *preferable* to a global clock over the whole of memory, and the
+condition under which that advantage matters. *(Levy & Lipman is the source;
+the mechanism is what earns the marks.)* **[4 marks]**
 
 ---
 

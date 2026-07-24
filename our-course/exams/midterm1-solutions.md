@@ -1,478 +1,418 @@
 > # ⚠️ SPOILER — MODEL ANSWERS AND MARK SCHEME ⚠️
 > ## Do NOT read this until you have sat Midterm 1 under timed conditions.
-> This file contains complete solutions. Reading it first destroys the only
-> honest measurement you will get. You have been warned.
+> Reading it first destroys the only honest measurement you will get.
 
 ---
 
 # Midterm 1 — Solutions and Mark Scheme
 
-General marking guidance: 1 mark ≈ one distinct correct point. On prose parts,
-ask "would a supervisor accept this sentence as a made point?" — a vague gesture
-at the right idea is half a mark, not a mark. Calculation parts: full method
-with an arithmetic slip keeps most marks; a bare correct number with no working
-gets at most half.
+General guidance: 1 mark ≈ one distinct made point. Prose parts: a vague
+gesture at the right idea is half a mark, not a mark. Calculation parts: full
+method with an arithmetic slip keeps most marks; a bare correct number earns at
+most half. A clearly stated alternative convention, applied consistently, earns
+full marks.
 
 ---
 
-## Question 1 — Protection and system calls
+## Question 1 — Processes, the process API, and limited direct execution
 
-### (a) Dual-mode operation [4 marks]
+### (a) The two register saves [4 marks]
 
-- The CPU has (at least) two privilege levels: **user mode** (restricted) and
-  **kernel/supervisor mode** (unrestricted). A **mode bit** in a status/control
-  register records the current mode; the hardware checks it on every
-  instruction. **[1]**
-- In user mode certain **privileged instructions** trap instead of executing —
-  e.g. loading the page-table base register / changing the MMU mapping;
-  disabling interrupts; executing HALT; direct access to device I/O
-  registers. (Any two concrete examples.) **[2]**
-- Transitions: user→kernel only via a controlled entry point — a **trap /
-  syscall instruction, an interrupt, or a fault** — which switches the mode bit
-  *and* jumps to a kernel-defined handler. Kernel→user via a
-  return-from-trap that lowers the mode bit. The key point for the mark: user
-  code cannot set the mode bit itself. **[1]**
+- **Save 1 — the hardware, at the trap.** When the timer interrupt fires, the
+  hardware switches to kernel mode and saves the interrupted process A's user
+  registers and PC into A's **kernel stack** (the trap frame) — just enough
+  that a return-from-trap could resume A exactly where it was. **[1.5]**
+- **Save 2 — the OS, at the switch.** The kernel's scheduler decides to switch:
+  the context-switch code saves A's current **kernel** register context (the
+  callee-saved registers, stack pointer, return address) into A's process
+  structure (PCB), and restores B's saved kernel context, thereby switching
+  kernel stacks and eventually returning-from-trap into B. **[1.5]**
+- **Why the timer is indispensable:** without it, regaining the CPU depends on
+  the process trapping voluntarily; a process that neither makes a system call
+  nor faults — a spin loop — holds the CPU forever. The timer converts
+  "hopefully" into "within one tick". **[1]**
 
-### (b) Tracing `read(fd, buf, n)` [8 marks]
+*Common wrong answer:* describing one save that mixes both — "the OS saves the
+registers to the PCB when the interrupt happens". The point of the part is that
+the trap-frame save (hardware, kernel stack, every trap) and the context save
+(OS, PCB, only on an actual switch) are distinct events with distinct agents.
 
-One mark each for roughly these eight steps (order matters):
+### (b) fork/exec and the shell [8 marks]
 
-1. The libc `read()` wrapper places the **system-call number** and the
-   arguments (`fd`, `buf`, `n`) in the agreed registers and executes the
-   **trap/`ecall`** instruction. **[1]**
-2. The trap switches to kernel mode, saves the user PC and registers (the
-   trap frame), and vectors to the kernel's syscall dispatcher, which uses the
-   call number to select `sys_read`. **[1]**
-3. The kernel **validates**: is `fd` a valid open file descriptor for this
-   process? Is the `[buf, buf+n)` range legal, mapped, writable user memory?
-   Reject with `-EFAULT`/`-EBADF` otherwise. **[1]**
-4. It follows the descriptor to the open-file object / inode and asks the
-   **file system**, which determines the disk block(s) needed and calls into the
-   **device driver**. **[1]**
-5. The driver programs the disk controller (target block, buffer, direction)
-   and starts the transfer (typically via DMA). **[1]**
-6. The calling process has nothing to do until the data arrives, so the kernel
-   **blocks** it (moves it off the CPU, state → *waiting*) and **schedules
-   another process**. **[1]**
-7. When the controller finishes it raises an **interrupt**; the driver's
-   interrupt handler runs, copies/confirms the data into the kernel buffer (or
-   completes the DMA), and **wakes** the waiting process (state → *ready*).
+**(i) [4 marks]** The second `fork()` executes only inside the first child
+(it is inside the `if (fork() == 0)` branch), so **three processes** run:
+the original P, child C1, grandchild C2. **[1]**
+
+Output: P prints `A` then `D`; C1 prints `B` then `D`; C2 prints `C` then `D`.
+So one `A`, one `B`, one `C`, and **three `D`s** — six lines. **[1]**
+
+- `D` before `B`: **yes** — P's `D` is concurrent with everything C1 does;
+  nothing orders P behind its child (there is no `wait`). **[1]**
+- `C` before `B`: **no** — `C` is printed by C2, which is created by C1 *after*
+  C1 has printed `B`; program order within C1 plus fork-happens-after make
+  `B` precede `C` in every schedule. **[1]**
+
+*Marking note:* the stem's line-buffering assumption is load-bearing. A
+candidate who observes that with `stdout` redirected to a file, unflushed
+buffer contents are duplicated by each `fork()` — P's buffered `A` reaches
+all three processes and C1's buffered `B` reaches C2, giving nine lines
+(three `A`s, two `B`s, one `C`, three `D`s) — has answered better than the
+model; credit in full.
+
+**(ii) [4 marks]**
+1. Shell parses the line, calls **`fork()`**. **[0.5]**
+2. **In the child**, before `exec`: rearrange the file descriptors — close
+   fd 0 and open `in.txt` (it lands in fd 0, the lowest free slot); close fd 1
+   and open/create `out.txt` (lands in fd 1). (Equivalently `open` + `dup2`.)
    **[1]**
-8. When rescheduled, the kernel copies the data into the user's `buf`, puts the
-   **return value** (bytes read, or −1) in the return register, and executes
-   **return-from-trap** back to the instruction after `read()`, in user mode.
-   **[1]**
+3. The child calls **`exec("wc", ...)`**, which replaces the address space with
+   `wc` but **preserves the open-file table** — `wc` reads stdin and writes
+   stdout as always, never knowing about the redirection. **[1]**
+4. The parent shell calls **`wait()`** and prints the next prompt when the
+   child exits. **[0.5]**
 
-*Common wrong answer:* claiming the process busy-waits (spins) for the disk —
-mark down; the whole point is that it blocks and the CPU is given to someone
-else.
+The Ritchie–Thompson argument: because creation and loading are separate, the
+shell gets a moment *inside the new process, before the new program starts*,
+in which ordinary code can adjust the environment — redirections, pipes,
+closing fds. No cooperation from `wc` and no special-casing in the kernel is
+needed. A combined `spawn` must instead grow a parameter for every environment
+adjustment anyone will ever need (files to redirect, pipes to wire, directory,
+signal state, …) — the interface bloats to enumerate what fork/exec get for
+free. **[1]**
 
-### (c) Can protection be software-only? [8 marks]
+*Marking note:* the mark in (ii) is for the *argument*, not the incantation —
+"the child runs shell code between fork and exec, so redirection is just
+code" is the sentence a supervisor is looking for.
 
-**(i) Two reasons compilation alone is insufficient [4 marks]** — any two of:
-- You cannot trust the binary. A checker only constrains code it actually
-  verifies; hand-written assembly, self-modifying code, JITs, or a maliciously
-  crafted binary that was never passed through your compiler can do anything.
-  Without hardware enforcement there is no way to *require* that only checked
-  code runs. **[2]**
-- Computed control flow and computed addresses are undecidable in general — you
-  cannot statically prove that an arbitrary indirect jump or a pointer computed
-  at run time stays in bounds, so a purely static check must either reject
-  legal programs or insert run-time checks anyway. **[2]**
-- Other valid points: an errant DMA or a wild pointer needs *run-time*
-  interception the compiler cannot provide; a bug in the trusted compiler/loader
-  compromises the whole system with no defence in depth. (Award for any two
-  well-argued reasons.)
+### (c) Syscall overhead, and Ousterhout [8 marks]
 
-**(ii) Designing software-only confinement [4 marks]**
+**(i) [4 marks]**
+- Syscall rate = 50,000 × 8 = 400,000 syscalls/s. **[1]**
+- Overhead = 400,000 × 3,000 = 1.2 × 10⁹ cycles/s. **[1]**
+- Fraction of the 2 GHz core = 1.2 × 10⁹ / 2 × 10⁹ = **60%**. **[1]**
+- Cap: each request costs 8 × 3,000 = 24,000 overhead cycles, so overhead
+  alone limits the core to 2 × 10⁹ / 24,000 ≈ **83,000 requests/s**. **[1]**
 
-This is a *derivation* part: credit **any coherent scheme** that (1) inserts
-run-time checks or transformations on memory accesses and control transfers,
-(2) closes the "jump past the check" loophole, and (3) correctly identifies
-the cost and where it falls. The model answer below is essentially Wahbe et
-al.'s software fault isolation (1993; assigned week-2 reading) — but neither
-the term nor the paper is required, and a different-but-sound design (full
-bounds checks with traps, or even interpretation/JIT with checks, with its
-higher cost acknowledged) earns the same marks.
+**(ii) [4 marks]** Ousterhout's thesis (1990): OS operations were not tracking
+raw processor speed because they are dominated by things that improve much more
+slowly than CPU arithmetic — **memory latency** and the fixed costs of
+kernel crossings (trap machinery, and today the cache/TLB pollution each
+crossing causes). **[1]** So "CPUs are 1000× faster" misses the point: the
+denominator of syscall cost is not CPU arithmetic speed; measured in cycles,
+crossings have improved far less, and (i) shows a syscall-heavy server still
+burning most of a modern core on overhead. **[1]** The gap CPU-vs-memory has
+*widened* since 1990, which strengthens, not dates, the thesis for
+crossing-heavy and memory-bound work. **[1]**
 
-- **Confining loads/stores [1]:** allocate the sandbox at an alignment-chosen
-  base (all its addresses share a fixed top-bit pattern), and have the
-  rewriter insert, before every load/store through a *computed* address, a
-  short sequence that **forces the address into the region** — AND with a mask
-  then OR in the region tag (or an explicit bounds-check that traps).
-  Statically verifiable accesses need no inserted code.
-- **Confining jumps, unskippably [1]:** indirect jumps/calls get the same
-  masking so they can only land inside the sandbox's code area — and the
-  checks must be impossible to bypass, e.g. force all control transfers to
-  land on fixed-alignment instruction boundaries so a jump cannot land
-  *between* a check and the access it guards, or keep the sanitised address in
-  a **dedicated reserved register** that the untrusted code is verified (at
-  load time) never to write by any other path. A scheme with checks but no
-  answer to "why can't the module jump over them?" loses this mark.
-- **Cost and where it falls [1]:** a few extra ALU instructions on **every
-  unverifiable load, store, and indirect branch** — overhead paid continuously
-  *inside* the module's execution (typically a few to tens of percent), unlike
-  MMU protection, which is free in the running code and costs only at boundary
-  crossings. The verifier/rewriter also joins the trusted computing base.
-- **When it beats a separate process [1]:** when **boundary crossings
-  dominate** — many small, frequent calls between host and module (kernel
-  extensions, packet filters, device-driver plugins), where the process-based
-  design pays a trap/mode-switch and its TLB/cache fallout per call but a
-  sandboxed call is just a function call. (Also acceptable: hardware with no
-  MMU at all.)
+Where the colleague is right: **compute-bound workloads** — long CPU bursts,
+few crossings, working set in cache — do scale with processor speed; there the
+OS is a rounding error. The verdict must carry this condition. **[1]**
+
+*Common wrong answer:* treating Ousterhout as "OSes are badly written". The
+paper's claim is architectural (memory and crossing costs), not a code-quality
+complaint.
 
 ---
 
-## Question 2 — Processes and context switching
-
-### (a) State-transition diagram [4 marks]
-
-```
-                 admitted            dispatch
-   [new] ---------------> [ready] -------------> [running] ---------> [terminated]
-                            ^   ^                  |   |     exit
-              I/O or event  |   |  timer/pre-empt  |   |
-              completes     |   +------------------+   | I/O or wait
-                            |         (pre-empted)     v
-                            +----------------------[waiting/blocked]
-```
-
-- **new → ready:** admitted by the long-term scheduler. **running → ready:**
-  pre-empted (timer/quantum expiry or higher-priority arrival). **ready →
-  running:** dispatched by the scheduler. **running → waiting:** issues a
-  blocking request (I/O, wait, lock). **waiting → ready:** the event completes.
-  **running → terminated:** exits. **[4]** — award 1 per correct
-  state/transition group; full marks need all five states and the
-  pre-emption (running→ready) edge, which is what makes it a *pre-emptive*
-  system.
-
-### (b) PCB contents [3 marks]
-
-Half a mark each, six items (need six for full marks):
-- **PID / identity** — to name and refer to the process.
-- **Process state** — ready/running/waiting, for the scheduler.
-- **Saved CPU registers + program counter** — to resume after a switch.
-- **Memory-management info** — page-table base / address-space descriptor.
-- **Open-file table / descriptors** — the process's I/O state.
-- **Scheduling info** — priority, tickets, accumulated run time.
-- (Also acceptable: parent pointer, exit status, pending signals, accounting.)
-
-### (c) Process vs user-level thread switch [8 marks]
-
-**(i) What a process switch does that a ULT switch does not [5 marks]** — three
-or more of, each with a reason:
-- **Switch the address space** — reload the page-table base register (e.g.
-  `satp`/CR3). ULTs of one process share the address space, so nothing changes.
-  **[1 + 1 for the flush point below]**
-- **Flush / invalidate the TLB** (or rely on ASIDs) because the virtual→physical
-  mapping just changed; the ensuing TLB misses are a real cost. Not needed for
-  ULTs — same mappings. **[1]**
-- **Cross the user/kernel boundary** — a process switch happens *in the kernel*
-  via a trap and return-from-trap, saving the full trap frame and touching
-  kernel scheduler state. A ULT switch is a plain function call entirely in user
-  mode: it saves only the callee-saved registers + `ra`/`sp` (the caller-saved
-  ones are already dead at the call), and never enters the kernel. **[1 + 1]**
-- Also creditable: switching kernel stacks, updating `current`/`myproc`,
-  re-arming per-process kernel state.
-
-Full 5 marks: at least three distinct items, each with the "why it's
-unnecessary for ULTs" reason. The register-set observation (callee-saved only,
-because the switch is a function call) is the one most students miss — reward
-it.
-
-**(ii) Overhead calculation [3 marks]**
-- Process: 50 000 × 6 µs = 300 000 µs = 0.30 s of switching per second =
-  **30%** of CPU time. **[1.5]**
-- ULT: 50 000 × 0.1 µs = 5 000 µs = 0.005 s per second = **0.5%**. **[1.5]**
-
-### (d) What user-level threads cannot do [5 marks]
-
-Two things, each with the I/O-bound and multi-core consequence:
-- **A blocking system call blocks the whole process.** The kernel sees one
-  schedulable entity; if one ULT makes a blocking `read`, every ULT in the
-  process stalls until it returns. For an **I/O-bound** program this is
-  crippling — you lose exactly the overlap threads were meant to provide (unless
-  you resort to non-blocking I/O + an event loop). **[2]** — (mention of
-  scheduler activations / async I/O as the fix is a bonus, not required.)
-- **ULTs cannot run in parallel on multiple cores.** The kernel schedules the
-  one process on one core at a time, so N user threads still get one core's worth
-  of CPU. On a **multi-core** machine a CPU-bound multithreaded program gets no
-  speed-up from ULTs, whereas kernel threads can be placed on different cores.
-  **[2]**
-- The remaining **[1]** for a clear framing of the underlying reason: the kernel
-  is unaware of user-level threads, so it can neither reschedule around a block
-  nor spread them across cores.
-
----
-
-## Question 3 — Scheduling
+## Question 2 — Scheduling
 
 ### (a) Definitions [3 marks]
 
-- **Turnaround time** = completion time − arrival time (total time in the
-  system). **[1]**
-- **Waiting time** = turnaround − CPU burst (time spent ready but not running).
+- **Turnaround** = completion − arrival; **response** = first-run − arrival.
   **[1]**
-- **Response time** = first-dispatch time − arrival time (time until the process
-  first runs). An interactive scheduler should minimise **response time**,
-  because perceived interactivity depends on how quickly a job first reacts, not
-  on when it finally finishes. **[1]**
+- Optimal average turnaround (simultaneous arrivals): **SJF** (STCF in the
+  preemptive/arrival case). Designed for response: **round-robin**. **[1]**
+- No single winner: turnaround wants short jobs run *to completion* first;
+  response wants every job started *soon* — slicing that helps the second
+  stretches completions and hurts the first. **[1]**
 
-### (b) The three schedules [8 marks]
+### (b) The three schedules [9 marks]
 
-Table for reference (arrival, burst): P1(0,9) P2(1,5) P3(3,2) P4(7,3).
+Jobs (arrival, length): A(0,8) B(2,4) C(4,1) D(5,2). Total work 15.
 
-**(i) FCFS** — run in arrival order. **[2 marks: chart 1, metrics 1]**
-
-```
-    [========P1========][===P2====][P3][=P4=]
-     0                  9          14  16   19
-```
-
-| Proc | Finish | TAT | Wait | Resp |
-|------|-------:|----:|-----:|-----:|
-| P1   | 9      | 9   | 0    | 0    |
-| P2   | 14     | 13  | 8    | 8    |
-| P3   | 16     | 13  | 11   | 11   |
-| P4   | 19     | 12  | 9    | 9    |
-
-Average TAT = (9+13+13+12)/4 = **11.75**; average Wait = (0+8+11+9)/4 =
-**7.00**; average Resp = (0+8+11+9)/4 = **7.00** (under FCFS a process first
-runs the moment it reaches the front, so response = waiting here). The long P1
-at the head of the queue is a small convoy effect in action.
-
-**(ii) SRTF** (pre-emptive; at each instant run the least remaining time).
-**[2.5 marks: chart 1.5, metrics 1]**
-
-Reasoning highlights — there are **two pre-emptions**: P1 runs 0–1; at t=1 P2
-arrives with burst 5 < P1's remaining 8, **pre-empting P1**. P2 runs 1–3; at
-t=3 P3 arrives with burst 2 < P2's remaining 3, **pre-empting P2**. P3 runs
-3–5 and finishes. P2 resumes 5–8 (at t=7 P4 arrives with burst 3, but P2's
-remaining 1 is smaller, so **no** pre-emption) and finishes. Then P4 (3) beats
-P1 (remaining 8): P4 runs 8–11; P1 finally runs 11–19.
+**(i) FIFO [2 marks]**
 
 ```
-    [P1][P2 ][P3 ][P2   ][=P4=][=======P1=======]
-     0  1    3    5      8     11                19
+[========A========][===B===][C][=D=]
+ 0                 8       12  13  15
 ```
 
-| Proc | Finish | TAT | Wait | Resp |
-|------|-------:|----:|-----:|-----:|
-| P1   | 19     | 19  | 10   | 0    |
-| P2   | 8      | 7   | 2    | 0    |
-| P3   | 5      | 2   | 0    | 0    |
-| P4   | 11     | 4   | 1    | 1    |
+| Job | Finish | TAT | Resp |
+|-----|-------:|----:|-----:|
+| A   | 8      | 8   | 0    |
+| B   | 12     | 10  | 6    |
+| C   | 13     | 9   | 8    |
+| D   | 15     | 10  | 8    |
 
-Average TAT = (19+7+2+4)/4 = **8.00**; average Wait = (10+2+0+1)/4 = **3.25**;
-average Resp = (0+0+0+1)/4 = **0.25**.
+Average TAT = (8+10+9+10)/4 = **9.25**; average response = (0+6+8+8)/4 =
+**5.5**.
 
-**(iii) RR, q = 2** (new arrivals enqueued before a simultaneously-pre-empted
-process; on this table no arrival coincides with a quantum expiry, so the
-convention is never actually exercised — but it must be stated).
-**[2.5 marks: chart 1.5, metrics 1]**
-
-Queue trace: P1 runs 0–2 (P2 arrives at 1); at t=2 queue [P2, P1]. P2 runs 2–4
-(P3 arrives at 3) → [P1, P3, P2]. P1 runs 4–6 (rem 5) → [P3, P2, P1]. P3 runs
-6–8 and finishes (P4 arrives at 7) → [P2, P1, P4]. P2 runs 8–10 (rem 1) →
-[P1, P4, P2]. P1 runs 10–12 (rem 3) → [P4, P2, P1]. P4 runs 12–14 (rem 1) →
-[P2, P1, P4]. P2 runs 14–15, done → [P1, P4]. P1 runs 15–17 (rem 1) →
-[P4, P1]. P4 runs 17–18, done → [P1]. P1 runs 18–19, done.
+**(ii) STCF [3.5 marks]** Preemption decisions: at t=2, B (4) arrives and beats
+A (remaining 6) — **preempt A**. At t=4, C (1) beats B (remaining 2) —
+**preempt B**; C runs 4–5. At t=5, D (2) ties B (remaining 2) — tie goes to
+the earlier arrival, **B**, which runs 5–7. Then D (2) beats A (6): D runs 7–9.
+A finishes 9–15.
 
 ```
-    [P1][P2][P1][P3][P2][P1][P4][P2][P1][P4][P1]
-     0  2   4   6   8   10  12  14  15  17 18  19
+[A ][B ][C][B ][=D=][=====A=====]
+ 0  2   4  5   7    9           15
 ```
 
-| Proc | Finish | TAT | Wait | Resp |
-|------|-------:|----:|-----:|-----:|
-| P1   | 19     | 19  | 10   | 0    |
-| P2   | 15     | 14  | 9    | 1    |
-| P3   | 8      | 5   | 3    | 3    |
-| P4   | 18     | 11  | 8    | 5    |
+| Job | Finish | TAT | Resp |
+|-----|-------:|----:|-----:|
+| A   | 15     | 15  | 0    |
+| B   | 7      | 5   | 0    |
+| C   | 5      | 1   | 0    |
+| D   | 9      | 4   | 2    |
 
-Average TAT = (19+14+5+11)/4 = **12.25**; average Wait = (10+9+3+8)/4 =
-**7.50**; average Resp = (0+1+3+5)/4 = **2.25**.
+Average TAT = (15+5+1+4)/4 = **6.25**; average response = (0+0+0+2)/4 =
+**0.5**.
 
-**Comment [1 mark]:** SRTF gives by far the
-lowest average turnaround (8.00 vs FCFS 11.75 vs RR 12.25). It is provably
-optimal for average turnaround/waiting because always running the shortest
-remaining job minimises the total time work sits unfinished; the cost is
-possible starvation of long jobs (here P1, the longest, finishes last with
-TAT 19) and the need to know/estimate burst lengths. RR time-slices for good
-response (avg 2.25 vs FCFS's 7.00), but the slicing stretches every job's
-completion — its average turnaround is even worse than FCFS's here.
+**(iii) RR, q = 2 [3.5 marks]** Queue trace (arrivals enqueued before a
+simultaneously preempted job): A runs 0–2 (B arrives at 2; A preempted) →
+queue [B, A]. B runs 2–4 (C arrives at 4, enqueued before preempted B) →
+[A, C, B]. A runs 4–6 (D arrives at 5) → queue at 6: [C, B, D, A]. C runs 6–7,
+finishes early. B runs 7–9, finishes at quantum end. D runs 9–11, finishes.
+A runs 11–13 and, alone, 13–15.
 
-*Common errors:* missing the second SRTF pre-emption (P3 pre-empting P2 at
-t=3), or wrongly pre-empting P2 with P4 at t=7 (P2's remaining 1 < P4's 3);
-mis-ordering the RR queue after P3's slice ends at t=8 (P2 is at the head, not
-P1); a different but clearly-stated, internally-consistent RR convention can
-still earn full marks; computing waiting time as turnaround without
-subtracting the burst.
+```
+[A ][B ][A ][C][B ][D ][A     ]
+ 0  2   4   6  7   9   11     15
+```
 
-### (c) Lottery in expectation [3 marks]
+| Job | Finish | TAT | Resp |
+|-----|-------:|----:|-----:|
+| A   | 15     | 15  | 0    |
+| B   | 9      | 7   | 0    |
+| C   | 7      | 3   | 2    |
+| D   | 11     | 6   | 4    |
 
-Total tickets = 6 + 3 + 1 = 10.
+Average TAT = (15+7+3+6)/4 = **7.75**; average response = (0+0+2+4)/4 =
+**1.5**.
 
-**(i) [2 marks]** Expected CPU share = tickets/total:
-A = 6/10 = **60%**, B = 3/10 = **30%**, C = 1/10 = **10%**. Over 100 quanta the
-expected counts are A ≈ 60, B ≈ 30, C ≈ 10. **[2]**
+*Common errors:* wrongly preempting B with D at t=5 (it is a tie — the stated
+convention keeps B); mis-ordering the queue at t=4 (at t=4 the queue holds
+[A]; C is enqueued ahead of the preempted B, giving [A, C, B] — so A runs
+next, then C); computing B's response as 2−0 rather than from its own
+arrival.
 
-**(ii) [1 mark]** Each lottery C wins with probability p = 1/10 independently,
-so the number of lotteries held up to and including C's first win is geometric
-with mean **1/p = 10** lotteries **[0.5]**. (If a student instead counts the
-lotteries C *loses* before its first win — the failures-before-success
-convention, mean (1 − p)/p = **9** — accept it for full credit provided the
-convention is stated; the question asks for the count *including* the winning
-lottery, so an unexplained 9 is not credited.) The weakness exposed: lottery's shares are only correct *in
-expectation* — over short intervals the variance is large and a process can be
-unlucky for a long stretch — whereas **stride scheduling** achieves the same
-proportions deterministically (per-process "pass" advanced by a stride ∝
-1/tickets; always run the smallest pass), with bounded short-term error.
-**[0.5]**
+### (c) Lottery and stride [4 marks]
 
-### (d) MLFQ behaviour [2 marks]
+**(i) [2 marks]** Total tickets 400. Shares: A 100/400 = **25%**, B **12.5%**,
+C **62.5%**; of 80 quanta: A ≈ 20, B ≈ 10, C ≈ 50. **[1]** Only expectations,
+because each quantum is an independent random draw; over a window of n quanta
+the *proportional* deviation shrinks (relative error ~1/√n), so fairness
+improves with run length. **[1]**
 
-- **H (never blocks)** uses a full quantum at each level, so it is demoted
-  Q0 → Q1 → Q2 and settles in **Q2** (until a 100-tick boost briefly lifts
-  it). **L** runs 1 tick and blocks *before* consuming its 2-tick Q0 quantum,
-  so by the voluntary-block rule it stays in — and settles in — **Q0**. **[1]**
-- Consequence: whenever L's I/O completes it is runnable in Q0, strictly above
-  H, so it is dispatched **almost immediately** — excellent response — while H
-  runs in the gaps L leaves. MLFQ thus approximates SJF without knowing burst
-  lengths: interactive work floats, CPU-bound work sinks. **[1]**
+**(ii) [2 marks]** Strides: A = 10,000/100 = **100**, B = **200**, C = **40**.
+Trace (run min pass; ties alphabetical; pass += stride after running):
 
-*Common error:* asserting L is demoted because it "used a tick at Q0" — the rule
-demotes only on using a *full* quantum; a voluntary block before that keeps the
-process where it is.
+| Quantum | Min pass → runs | Passes after (A,B,C) |
+|--------:|-----------------|----------------------|
+| 1 | all 0 → A (alphabetical) | 100, 0, 0 |
+| 2 | 0 (B, C tied) → B | 100, 200, 0 |
+| 3 | 0 → C | 100, 200, 40 |
+| 4 | 40 → C | 100, 200, 80 |
+| 5 | 80 → C | 100, 200, 120 |
+| 6 | 100 (A) → A | 200, 200, 120 |
+| 7 | 120 → C | 200, 200, 160 |
+| 8 | 160 → C | 200, 200, 200 |
 
-### (e) Real-time: RM bound and EDF [4 marks]
+All passes next equal at 200, after 8 quanta: **A ran 2, B ran 1, C ran 5** —
+exactly 2:1:5 = 100:50:250. **[2 for a correct, consistent trace and the
+check; −½ for a tie-break slip that is otherwise consistent]**
 
-**(i) Utilisation vs the Liu–Layland bound [2 marks]**
+### (d) Deleting the MLFQ boost [4 marks]
 
-U = 2/5 + 2/8 + 2/10 = 0.40 + 0.25 + 0.20 = **0.85**. **[1]**
-0.85 > 0.780, so the set **fails** the Liu–Layland sufficient test. What that
-tells you: RM is **not proven** schedulable. What it does *not* tell you: that
-RM will miss a deadline — the bound is **sufficient, not necessary**, so the
-set may still be RM-schedulable; only an exact test (e.g. response-time
-analysis) can decide. **[1]** — the mark is for correctly stating the
-one-sidedness; "fails the test ⇒ unschedulable" is the classic error and
-loses it.
-
-*For reference (not required):* response-time analysis with RM priorities
-(T1 > T2 > T3 by period) gives fixed points R₁ = 2 ≤ 5, R₂ = 2+2 = 4 ≤ 8,
-R₃ = 2+4+2 = 8 ≤ 10 — all deadlines met, so this set **is** RM-schedulable
-despite failing the bound. Reward a candidate who demonstrates this.
-
-**(ii) EDF [2 marks]**
-
-EDF (dynamic priority: always run the released job with the earliest absolute
-deadline) is optimal for this model: it meets **all deadlines whenever
-U ≤ 1** — and here U = 0.85 ≤ 1, so EDF is **guaranteed** to schedule the set.
-**[1]** Why the bound is 1: EDF re-orders work at run time so the processor is
-never idle while any job is urgent-and-ready, so feasibility reduces to simply
-not demanding more than 100% of the CPU. RM's priorities are **fixed** by
-period; a low-rate task can be forced to wait through worst-case phasings of
-higher-rate tasks even when spare capacity exists elsewhere in the timeline,
-which is why static priorities cannot promise more than ≈ 0.693–0.78 (→ ln 2
-as n → ∞) in general. **[1]**
+- What Rule 4 solves is **gaming**: charging the full allotment regardless of
+  yields stops a job hovering at high priority by strategic I/O. It does
+  nothing about **starvation**: a job legitimately demoted to the bottom queue
+  stays there forever if higher queues never drain. **[1]**
+- Failure workload: a steady stream of interactive jobs keeps the top queues
+  perpetually non-empty; the bottom-queue CPU-bound job receives zero CPU
+  indefinitely. The boost bounds its wait by the boost period. **[1]**
+- Second, distinct loss: a job that **changes phase** (long compute, then
+  becomes interactive) is stuck at the bottom with no route back up; the boost
+  is the forgiveness mechanism. **[1]**
+- Acceptable when: the machine genuinely has no long-running work it must keep
+  alive under sustained interactive load — e.g. a dedicated interactive
+  appliance where background work is explicitly best-effort, or a batch-only
+  box where the top queues are usually empty. Verdict must name a condition of
+  this kind. **[1]**
 
 ---
 
-## Question 4 — Concurrency
+## Question 3 — Paging, TLBs, and multi-level tables
 
-### (a) Definitions [4 marks]
+### (a) Bookwork [4 marks]
 
-- **Race condition:** the result depends on the relative timing/interleaving of
-  operations by concurrent threads on shared state; different schedules give
-  different (some wrong) outcomes. **[1]**
-- **Critical section:** a region of code that accesses shared state and must not
-  be executed by more than one thread at a time. **[1]**
-- Four conditions for correct mutual exclusion (any phrasing): **(1) mutual
-  exclusion** — at most one thread in the critical section; **(2) progress** —
-  if the section is free, one of the contending threads must be allowed in (no
-  needless blocking); **(3) bounded waiting / no starvation** — a thread waits
-  only a bounded number of turns; **(4) no assumptions about speed or number of
-  CPUs**. **[2]** (half a mark each for the three beyond mutual exclusion).
+**(i) [2]** The linear table must be sized for the whole virtual address space
+(2²⁰ PTEs = 4 MB here) even when almost none of it is mapped. The two-level
+table allocates leaf pages only for regions that exist — space proportional to
+what is mapped — at the cost of an **extra memory access per walk** (directory,
+then PTE) and extra complexity. It pays because real address spaces are
+**sparse**: a few dense regions, vast invalid gaps.
 
-### (b) The race and its fix [8 marks]
+**(ii) [2]** Any four (½ each): **valid** (is the translation usable — else
+fault); **protection** (read/write/execute enforcement); **present** (in
+memory vs swapped — drives page faults); **dirty** (written since load — must
+the evictor write it back); **reference/accessed** (touched recently — food
+for clock/LRU approximation); **user/supervisor** (may user mode touch it).
 
-**(i) Interleaving [3 marks]** — `balance` starts at 100, both withdraw 80:
+### (b) Translation and sizing [10 marks]
 
-```
- T1: b1 = balance (100)
- T2: b2 = balance (100)      <- both read before either writes
- T1: 100 >= 80  -> b1 = 20
- T2: 100 >= 80  -> b2 = 20
- T1: balance = 20
- T2: balance = 20
-```
+**(i) [5 marks]** `0x004025A8` = binary
+`0000 0000 01 | 00 0000 0010 | 0101 1010 1000`:
 
-Both tests saw 100, both succeeded, and the account paid out 160 from a balance
-of 100. Final `balance` = **20** (a lost update — the second write clobbers the
-first; the "impossible" outcome is two successful 80-withdrawals from 100).
-**[3]** — 2 for a correct interleaving showing both reads before both writes, 1
-for the correct final value and the observation that both withdrawals succeeded.
+- Directory index = top 10 bits = **1**; page-table index = next 10 bits =
+  **2**; offset = **0x5A8**. **[1.5]**
+- Access 1 — page-directory entry: 0x10000 + 1 × 4 = **0x10004** → PFN 0x023,
+  so the leaf page lives at 0x023 × 0x1000 = 0x23000. **[1.5]**
+- Access 2 — PTE: 0x23000 + 2 × 4 = **0x23008** → PFN 0x080. **[1]**
+- Physical address = 0x080 × 0x1000 + 0x5A8 = **0x805A8** (a third access
+  fetches the data itself). **[1]**
 
-**(ii) Spinlock from test-and-set [5 marks]**
+**(ii) [3 marks]** One leaf page of PTEs maps 2¹⁰ × 4 KB = **4 MB**. 8 MB of
+code+heap → 2 leaf pages; 4 MB stack → 1 leaf page; plus the directory itself:
+4 pages × 4 KB = **16 KB**. **[2]** Linear table: 2²⁰ × 4 B = **4 MB** — a
+ratio of **256×**. **[1]**
 
-```c
-volatile int lock = 0;
+**(iii) [2 marks]** EAT = TLB + h·(mem) + (1−h)·(walk + mem) =
+2 + 0.98 × 60 + 0.02 × (2 × 60 + 60) = 2 + 58.8 + 3.6 = **64.4 ns**. **[2 —
+formula 1, evaluation 1]** (Assumption: walk accesses are full memory accesses,
+TLB probe paid on every access.)
 
-void spin_lock(volatile int *lock) {
-    while (test_and_set(lock) != 0)   // spin while it was already held
-        ;                             // (returns old value; 0 means we got it)
-}
-void spin_unlock(volatile int *lock) {
-    *lock = 0;
-}
+### (c) 8 KB pages [6 marks]
 
-void withdraw(int amount) {
-    spin_lock(&lock);
-    int b = balance;
-    if (b >= amount) {
-        b = b - amount;
-        balance = b;
-    }
-    spin_unlock(&lock);
-}
-```
+- **"The table halves" — two defensible readings; either earns the mark.**
+  Against a *linear* table: 2³²/2¹³ = 2¹⁹ entries × 4 B = **2 MB** (from
+  4 MB) — halved as claimed. The stronger answer quantifies it for the
+  **two-level table this machine actually uses**, with (b)(ii)'s process: at
+  8 KB pages a table page holds 8 KB / 4 B = 2,048 PTEs, the split becomes
+  8 (directory) + 11 (table) + 13 (offset), and one leaf now maps
+  2,048 × 8 KB = 16 MB — so the 8 MB code+heap and the 4 MB stack take one
+  leaf each, plus a 256-entry directory (1 KB): 2 × 8 KB + 1 KB = **17 KB,
+  up from 16 KB** (24 KB if the directory is padded to a full page). For a
+  sparse process the claim is *false* — the leaves got bigger while the
+  process never needed many — and saying so, with the computation, is the
+  best answer and earns full credit. **[1]**
+- **Reach doubles — true:** 64 × 8 KB = **512 KB** (from 256 KB), so fewer TLB
+  misses for a given working set. **[1]**
+- **The cost: internal fragmentation.** Every mapped region now wastes on
+  average half of 8 KB rather than half of 4 KB in its last page — and the
+  waste lands on **processes with many small regions** (many small mappings,
+  many small processes): their resident footprint inflates, which is memory
+  *and* cache-of-pages pressure. Fault transfers also move 8 KB whether or not
+  the second half is wanted, wasting disk bandwidth when locality is poor.
+  **[2]**
+- **Verdict with conditions:** take the trade for machines running few, large,
+  dense working sets (databases, scientific compute — the workloads for which
+  large/huge pages exist); refuse it where the workload is many small
+  processes or sparse fine-grained mappings, where the fragmentation bill
+  exceeds the table-and-reach win. **[2]**
 
-Marks: correct `test_and_set` loop semantics — spin while the returned *old*
-value is 1, proceed when it is 0 **[2]**; `spin_unlock` simply stores 0 **[1]**;
-lock acquired **before the read** and released **after the write-back**, so the
-whole read-test-modify-write is one critical section **[2]**. Deduct if the lock
-wraps only the write (the race is in the read-test-write as a whole), or if
-`test_and_set` is used non-atomically.
+*Marking note:* "strictly better" is the flag — full marks require locating
+who pays (internal fragmentation, wasted transfer), not merely agreeing with
+the two true claims.
 
-### (c) When a spinlock is wrong [8 marks]
+---
 
-**(i) Long/blocking critical sections and single-core [4 marks]**
-- A spinlock **busy-waits**, burning CPU while it waits. If the holder runs for
-  a long time or (worse) **blocks** inside the critical section, every waiter
-  spins uselessly for that whole time — pure waste and possibly deadlock (a
-  spinlock holder must never sleep). Use a **blocking mutex / sleep-lock**: a
-  waiter is put to sleep and the CPU is given to other work, then woken on
-  release. **[2]**
-- On a **single core** a spinlock is especially bad: the waiter spins but the
-  *only* CPU is exactly what the lock-holder needs to make progress and release
-  the lock. The spinner just wastes its whole quantum; nothing can change until
-  it is pre-empted. Here you should **yield/block** (a mutex that deschedules the
-  waiter) so the holder can run. Spinlocks only make sense when the holder is
-  running *concurrently on another CPU* and the wait is expected to be very
-  short. **[2]**
+## Question 4 — Memory under pressure
 
-**(ii) Lab 5 allocator contention [4 marks]**
-- The single lock is *correct*, but it **serialises** every `kalloc`/`kfree`
-  across all CPUs: while one CPU holds it, the others spin (test-and-set
-  repeatedly) instead of doing useful work, and the cache line holding the lock
-  ping-pongs between cores. The cost of contention is this lost parallelism plus
-  the coherence traffic — throughput stops scaling with cores. **[2]**
-- The fix (as in Lab 5) is to **split the data structure so unrelated operations
-  take different locks**: give each CPU its own free list and lock, so the common
-  case takes an uncontended local lock; only when a CPU's list is empty does it
-  **steal** a batch from another CPU's list (briefly taking that lock). Same
-  semantics — you can still find any free page — but contention collapses.
-  **[2]** (Analogous answer for the bucketed buffer cache is equally valid.)
+### (a) Fragmentation and allocators [4 marks]
+
+- **External:** free memory shredded into pieces too small to satisfy a
+  request although the total would suffice — a disease of variable-size
+  allocation. **[1]** **Internal:** waste *inside* an allocated unit larger
+  than the request. **[1]**
+- Paging eliminates **external** fragmentation (any free frame serves any
+  page) and retains **internal** — the unused tail of a region's last page.
+  **[1]**
+- Coalescing: without merging adjacent free chunks, splitting is a one-way
+  ratchet — the list degenerates until no large request can ever succeed.
+  Slab/segregated caches: for a fixed-size object they remove the repeated
+  search-and-split of a general allocator and (Bonwick's point) the repeated
+  **re-initialisation** — freed objects come back still constructed. **[1]**
+
+### (b) LRU vs clock [8 marks]
+
+Reference string: 0 1 2 0 3 1 4 2 1 3, three frames.
+
+**(i) LRU [3 marks]** (state shown most-recent first)
+
+| Ref | Result | Evict | State (MRU→LRU) |
+|----:|--------|-------|------------------|
+| 0 | miss | — | 0 |
+| 1 | miss | — | 1 0 |
+| 2 | miss | — | 2 1 0 |
+| 0 | hit  | — | 0 2 1 |
+| 3 | miss | 1 | 3 0 2 |
+| 1 | miss | 2 | 1 3 0 |
+| 4 | miss | 0 | 4 1 3 |
+| 2 | miss | 3 | 2 4 1 |
+| 1 | hit  | — | 1 2 4 |
+| 3 | miss | 4 | 3 1 2 |
+
+**8 misses** (2 hits). **[3 — trace 2, count 1]**
+
+**(ii) Clock [4 marks]** Frames F1–F3 in fill order; superscript = use bit.
+
+| Ref | Result | Hand action | Frames after |
+|----:|--------|-------------|--------------|
+| 0 | miss | fill | 0¹ – – |
+| 1 | miss | fill | 0¹ 1¹ – |
+| 2 | miss | fill | 0¹ 1¹ 2¹ |
+| 0 | hit | use←1 | 0¹ 1¹ 2¹ |
+| 3 | miss | clear 0,1,2; evict **0**; hand→F2 | 3¹ 1⁰ 2⁰ |
+| 1 | hit | use←1 | 3¹ 1¹ 2⁰ |
+| 4 | miss | clear 1; evict **2**; hand→F1 | 3¹ 1⁰ 4¹ |
+| 2 | miss | clear 3; evict **1**; hand→F3 | 3⁰ 2¹ 4¹ |
+| 1 | miss | clear 4; evict **3**; hand→F2 | 1¹ 2¹ 4⁰ |
+| 3 | miss | clear 2; evict **4**; hand→F1 | 1¹ 2⁰ 3¹ |
+
+**8 misses** (2 hits: references 4 and 6). **[4 — trace 3, count 1]**
+
+**(iii) [1 mark]** They diverge first at the miss on 3: with **every use bit
+set, clock degrades to FIFO** and evicts 0 (oldest), where LRU evicts 1
+(least recent). Clock therefore keeps 1 and hits at reference 6 where LRU
+misses — and pays it back at reference 9. LRU holds a **total recency
+ordering**; the use bit remembers only "touched since the hand last passed".
+(Here the totals happen to tie at 8 — the approximation is good, not free.)
+
+*Common error:* forgetting that the hand does **not** advance on a hit, or
+restarting the sweep at F1 on every miss instead of where the hand stopped.
+
+### (c) Fault-rate algebra [4 marks]
+
+**(i) [2]** EAT = (1−p)·100 ns + p·(10 ms) ≈ 100 + p × 10⁷ ns. Requiring
+≤ 200 ns: p × 10⁷ ≤ 100 → **p ≤ 10⁻⁵** — one fault per 100,000 accesses.
+(The −100p term is negligible; stating the approximation earns the formula
+mark.)
+
+**(ii) [2]** Mean service = 0.7 × 10 ms + 0.3 × 20 ms = **13 ms**. EAT =
+100 + 10⁻⁵ × 1.3 × 10⁷ = 100 + 130 = **230 ns**. **[working 1, result 1]**
+
+### (d) VMS without a reference bit [4 marks]
+
+- Each process has a **resident-set limit**; within it, replacement is plain
+  **FIFO** — no reference information needed. **[1]**
+- Pages evicted from a resident set are not discarded: they move, still in
+  memory, onto global **second-chance lists** — a clean list and a dirty list
+  (dirty pages written back lazily, in batches). A fault on a listed page is a
+  **soft fault**: the page is re-attached from the list with **no disk I/O**.
+  Only pages that age off the lists are truly lost. **[1]**
+- Why this approximates LRU: FIFO's mistakes — evicting a hot page — are
+  cheaply undone, because a hot page faults back from the list before it ages
+  out. The lists give FIFO exactly the "was it referenced again soon?" signal
+  the missing hardware bit would have supplied, at the cost of a soft fault
+  rather than a bit test. **[1]**
+- Judgement: the per-process limit **isolates** processes — a memory hog can
+  only churn its own resident set, while a global clock lets the hog evict
+  everyone's pages. That matters precisely on multiprogrammed machines with
+  untrusted or bursty workloads; on a single-user machine with one dominant
+  working set the global policy wastes less. (Either well-argued advantage —
+  isolation, or batched dirty writes — earns the mark, with its condition.)
+  **[1]**
 
 ---
 

@@ -1,0 +1,12 @@
+# Built tools (starter/ and solutions/ share a Makefile)
+mycat
+myls
+mygrep
+
+# Generated fixture tree
+fixtures/tree/
+
+# Student deliverables, if worked on in place
+TOOLCHAIN.md
+GDB-NOTES.md
+STRACE-NOTES.md

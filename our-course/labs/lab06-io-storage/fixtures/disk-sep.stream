@@ -1,0 +1,20 @@
+# disk-sep.stream -- the scheduler separation fixture.
+#
+# Requests at cylinders {10,90,20,80,55,45} (lba = cylinder*100, sector 0),
+# served with the head starting at cylinder 50 (pass start=50).  These six
+# requests are chosen so that FIFO, SSTF, SCAN and C-SCAN each produce a
+# DIFFERENT service order and a different total seek distance:
+#
+#   FIFO   285   order 10,90,20,80,55,45   (arrival order)
+#   SSTF   130   order 45,55,80,90,20,10   (nearest first)
+#   SCAN   120   order 55,80,90,45,20,10   (up then reverse)
+#   C-SCAN 155   order 55,80,90,10,20,45   (up then wrap to lowest)
+#
+# If a policy ever collides with FIFO's 285 on this stream it is not scheduling
+# at all -- which is exactly what the separation case in tests/run.sh checks.
+1000 1
+9000 1
+2000 1
+8000 1
+5500 1
+4500 1

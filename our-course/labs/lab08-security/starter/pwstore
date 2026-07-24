@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+# pwstore -- Lab 8 Part 1: a salted password store.  STARTER.
+#
+# A password store never keeps the password.  It keeps, per user, enough to
+# RE-DERIVE the verifier at authentication time and no more: a hashing scheme, a
+# random per-user salt, and the digest of (salt || password) under that scheme.
+#
+# Three schemes your cracker will later be run against:
+#   unsalted : digest = sha256(password)                 -- no salt at all
+#   salted   : digest = sha256(salt || password)         -- a random per-user salt
+#   slow     : digest = PBKDF2-HMAC-SHA256(password, salt, cost)
+#
+# PBKDF2 (RFC 2898) is the deliberately slow key-derivation function this lab
+# uses for the "slow hash" configuration.  Its `cost` is an iteration count, and
+# it ships in Python's standard library as hashlib.pbkdf2_hmac -- do not
+# hand-roll a slow hash.  For random salt bytes use os.urandom.
+#
+#   pwstore register <storefile> <user> <password> [scheme] [cost]
+#   pwstore auth     <storefile> <user> <password>
+#   pwstore dump     <storefile>
+#
+# The store file is one record per line:
+#   <user> <scheme> <cost> <salt-hex-or-dash> <hash-hex>
+#
+# The output lines below are a fixed contract -- the autograder greps them, so
+# keep them exactly as written.  What you implement is marked TODO.
+
+import hashlib      # noqa: F401  (you will want sha256 and pbkdf2_hmac)
+import hmac         # noqa: F401  (hmac.compare_digest, for constant-time compare)
+import os           # noqa: F401  (os.urandom, for salt)
+import sys
+
+DEFAULT_SCHEME = "salted"
+DEFAULT_COST = 200000       # PBKDF2 iterations for the slow scheme
+SALT_BYTES = 16
+
+
+def kdf(scheme, cost, salt, password):
+    """Derive the stored verifier for a password under a scheme+salt+cost.
+
+    TODO (Part 1): return the hex digest for each scheme:
+        unsalted -> sha256(password)
+        salted   -> sha256(salt || password)
+        slow     -> pbkdf2_hmac('sha256', password, salt, cost)
+    (password is a str; encode it to bytes.  salt is bytes.)
+    """
+    _ = (scheme, cost, salt, password)          # (silences "unused" until you use them)
+    return "0" * 64            # TODO: replace with the real derivation
+
+
+def parse_record(line):
+    user, scheme, cost, salt_hex, hash_hex = line.split()
+    salt = b"" if salt_hex == "-" else bytes.fromhex(salt_hex)
+    return {"user": user, "scheme": scheme, "cost": int(cost),
+            "salt": salt, "salt_hex": salt_hex, "hash": hash_hex}
+
+
+def read_store(path):
+    records = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    records.append(parse_record(line))
+    except FileNotFoundError:
+        pass
+    return records
+
+
+def cmd_register(argv):
+    if len(argv) < 3:
+        sys.stderr.write("usage: pwstore register <storefile> <user> <password> [scheme] [cost]\n")
+        return 2
+    path, user, password = argv[0], argv[1], argv[2]
+    scheme = argv[3] if len(argv) > 3 else DEFAULT_SCHEME
+    cost = int(argv[4]) if len(argv) > 4 else DEFAULT_COST
+    if scheme not in ("unsalted", "salted", "slow"):
+        sys.stderr.write("pwstore: unknown scheme '%s'\n" % scheme)
+        return 2
+
+    # TODO (Part 1): a fresh random salt per user is what makes two identical
+    # passwords hash to two different verifiers.  The salt is NOT a secret --
+    # store it in clear beside the hash, because auth has to re-derive with it.
+    # For 'unsalted' there is no salt ("-").
+    salt = b""
+    salt_hex = "-"          # TODO: for salted/slow, generate os.urandom(SALT_BYTES)
+
+    digest = kdf(scheme, cost, salt, password)
+    with open(path, "a") as f:
+        f.write("%s %s %d %s %s\n" % (user, scheme, cost, salt_hex, digest))
+    print("registered user=%s scheme=%s" % (user, scheme))
+    return 0
+
+
+def cmd_auth(argv):
+    if len(argv) < 3:
+        sys.stderr.write("usage: pwstore auth <storefile> <user> <password>\n")
+        return 2
+    path, user, password = argv[0], argv[1], argv[2]
+    rec = None
+    for r in read_store(path):          # last record for the user wins
+        if r["user"] == user:
+            rec = r
+    if rec is None:
+        print("auth user=%s result=FAIL" % user)
+        return 1
+
+    # TODO (Part 1): re-derive the verifier from the STORED salt/scheme/cost and
+    # the supplied password, and compare it against the stored hash.  Prefer
+    # hmac.compare_digest over == so the comparison does not leak, byte by byte,
+    # how much matched (not graded, but it is the right habit).
+    candidate = kdf(rec["scheme"], rec["cost"], rec["salt"], password)
+    ok = (candidate == rec["hash"])     # TODO: use hmac.compare_digest
+    print("auth user=%s result=%s" % (user, "OK" if ok else "FAIL"))
+    return 0 if ok else 1
+
+
+def cmd_dump(argv):
+    if len(argv) < 1:
+        sys.stderr.write("usage: pwstore dump <storefile>\n")
+        return 2
+    for r in read_store(argv[0]):
+        print("record user=%s scheme=%s salt=%s hash=%s" %
+              (r["user"], r["scheme"], r["salt_hex"], r["hash"]))
+    return 0
+
+
+def main(argv):
+    if len(argv) < 2:
+        sys.stderr.write("usage: pwstore <register|auth|dump> ...\n")
+        return 2
+    sub, rest = argv[1], argv[2:]
+    if sub == "register":
+        return cmd_register(rest)
+    if sub == "auth":
+        return cmd_auth(rest)
+    if sub == "dump":
+        return cmd_dump(rest)
+    sys.stderr.write("pwstore: unknown subcommand '%s'\n" % sub)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

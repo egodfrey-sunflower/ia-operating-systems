@@ -1,0 +1,4 @@
+*.img
+__pycache__/
+tests/oracle/xfsck
+.sweep-*.img

@@ -1,0 +1,21 @@
+# Built tools (starter/ and solutions/ share a Makefile)
+mystat
+myls
+mytail
+myfind
+
+# Generated fixture tree
+fixtures/tree/
+
+# Parts 4-5 (xfsck) built tools and generated images
+starter/xfsck/xfsck
+starter/xfsck/mkimg
+starter/xfsck/corrupt
+solutions/xfsck/xfsck
+solutions/xfsck/mkimg
+solutions/xfsck/corrupt
+*.img
+*.o
+
+# Python bytecode from the test harness
+__pycache__/

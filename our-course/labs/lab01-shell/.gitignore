@@ -1,0 +1,8 @@
+# Built shell (starter/ and solutions/ share a Makefile)
+msh
+
+# Generated fixture tree
+fixtures/tree/
+
+# Student deliverable, if worked on in place
+JOBCONTROL.md

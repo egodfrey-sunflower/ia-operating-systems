@@ -1,0 +1,31 @@
+// System call numbers
+#define SYS_fork    1
+#define SYS_exit    2
+#define SYS_wait    3
+#define SYS_pipe    4
+#define SYS_read    5
+#define SYS_kill    6
+#define SYS_exec    7
+#define SYS_fstat   8
+#define SYS_chdir   9
+#define SYS_dup    10
+#define SYS_getpid 11
+#define SYS_sbrk   12
+#define SYS_pause  13
+#define SYS_uptime 14
+#define SYS_open   15
+#define SYS_write  16
+#define SYS_mknod  17
+#define SYS_unlink 18
+#define SYS_link   19
+#define SYS_mkdir  20
+#define SYS_close  21
+
+// TODO Part 2: give trace() a system call number. 22 is free.
+
+// Parts 3-5. Given: you did the traversal once in Part 2, and doing the same
+// four-file edit three more times teaches nothing new. The kernel side --
+// the dispatch table entry and the implementation -- is still yours.
+#define SYS_sysinfo    23
+#define SYS_settickets 24
+#define SYS_getpinfo   25

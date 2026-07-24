@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+# accessmatrix -- Lab 8 Parts 2 & 3: Lampson's access matrix and its two
+# projections, plus revocation both ways.  REFERENCE.
+#
+# The matrix has subjects (rows), objects (columns) and a set of rights per
+# cell.  There is ONE underlying structure, `grants[(s,o)] = {rights}`.  The two
+# classical representations are PROJECTIONS of it, computed on demand:
+#
+#   acl(o)     -- the column: for a fixed object, who holds what.  (ACLs.)
+#   caplist(s) -- the row:    for a fixed subject, what it holds.   (Capabilities.)
+#
+# and `check(s,o,r)` reads the cell directly.  Because both projections are
+# derived from the same grants -- never stored separately -- they cannot
+# disagree with each other or with check.  That is the whole point of Part 2, and
+# the property test in tests/ is built to catch any implementation that keeps two
+# structures in step by hand and lets them drift.
+#
+# It reads a command script from a file argument, or '-' for stdin:
+#
+#   init <S> <O> <rights>     e.g.  init 6 6 rwx
+#   grant <s> <o> <r>
+#   check <s> <o> <r>
+#   acl <o>                   print the column
+#   caplist <s>               print the row
+#   revoke_subject <s> <r>    remove right r from subject s for EVERY object
+#   revoke_object  <o> <r>    remove right r from object o for EVERY subject
+#   indirect on|off           enable the indirection layer for object revocation
+#   storage                   print the storage cost of each representation
+#   counters                  print cumulative operation counters
+#   reset_counters
+
+import sys
+
+
+class Matrix:
+    def __init__(self):
+        self.S = 0
+        self.O = 0
+        self.rights = ""
+        self.grants = {}          # (s, o) -> set of right chars  (the ONE structure)
+        self.indirect = False
+        self.invalid = set()      # (o, r) invalidated via the indirection layer
+        self.acl_ops = 0          # cumulative work counters
+        self.cap_ops = 0
+
+    # -- the one structure, and the derived predicate ----------------------
+    def has(self, s, o, r):
+        if r not in self.grants.get((s, o), ()):
+            return False
+        if self.indirect and (o, r) in self.invalid:
+            return False          # revoked through the indirection layer
+        return True
+
+    # -- the two projections, both DERIVED from self.grants ----------------
+    def acl(self, o):
+        """The column: [(s, rights-string), ...] sorted by subject."""
+        out = []
+        for s in range(self.S):
+            rs = "".join(r for r in self.rights if self.has(s, o, r))
+            if rs:
+                out.append((s, rs))
+        return out
+
+    def caplist(self, s):
+        """The row: [(o, rights-string), ...] sorted by object."""
+        out = []
+        for o in range(self.O):
+            rs = "".join(r for r in self.rights if self.has(s, o, r))
+            if rs:
+                out.append((o, rs))
+        return out
+
+
+def run(script, out):
+    m = Matrix()
+    for raw in script:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        tok = line.split()
+        cmd = tok[0]
+
+        if cmd == "init":
+            m.S, m.O, m.rights = int(tok[1]), int(tok[2]), tok[3]
+            m.grants = {}
+            m.invalid = set()
+            m.indirect = False
+            m.acl_ops = m.cap_ops = 0
+
+        elif cmd == "grant":
+            s, o, r = int(tok[1]), int(tok[2]), tok[3]
+            m.grants.setdefault((s, o), set()).add(r)
+
+        elif cmd == "check":
+            s, o, r = int(tok[1]), int(tok[2]), tok[3]
+            out.write("check s=%d o=%d r=%s = %s\n"
+                      % (s, o, r, "yes" if m.has(s, o, r) else "no"))
+
+        elif cmd == "acl":
+            o = int(tok[1])
+            body = " ".join("%d:%s" % (s, rs) for s, rs in m.acl(o))
+            out.write("acl o=%d : %s\n" % (o, body))
+
+        elif cmd == "caplist":
+            s = int(tok[1])
+            body = " ".join("%d:%s" % (o, rs) for o, rs in m.caplist(s))
+            out.write("caplist s=%d : %s\n" % (s, body))
+
+        elif cmd == "revoke_subject":
+            # Remove right r from subject s across all objects.
+            #  ACL rep: s is scattered across every object's list -> visit all O.
+            #  Capability rep: s's rights are one row -> visit 1 list.
+            s, r = int(tok[1]), tok[2]
+            acl_ops = m.O
+            cap_ops = 1
+            for o in range(m.O):
+                m.grants.get((s, o), set()).discard(r)
+            m.acl_ops += acl_ops
+            m.cap_ops += cap_ops
+            out.write("revoke_subject s=%d r=%s acl_ops=%d cap_ops=%d\n"
+                      % (s, r, acl_ops, cap_ops))
+
+        elif cmd == "revoke_object":
+            # Remove right r from object o across all subjects.
+            #  ACL rep: o is one list -> visit 1 list.
+            #  Capability rep: capabilities for o are scattered across every
+            #    subject's row -> visit all S ... UNLESS an indirection layer
+            #    lets one entry be invalidated for everyone at once (cost 1).
+            o, r = int(tok[1]), tok[2]
+            acl_ops = 1
+            if m.indirect:
+                cap_ops = 1
+                m.invalid.add((o, r))            # invalidate once, for everyone
+            else:
+                cap_ops = m.S
+                for s in range(m.S):
+                    m.grants.get((s, o), set()).discard(r)
+            m.acl_ops += acl_ops
+            m.cap_ops += cap_ops
+            out.write("revoke_object o=%d r=%s acl_ops=%d cap_ops=%d\n"
+                      % (o, r, acl_ops, cap_ops))
+
+        elif cmd == "indirect":
+            m.indirect = (tok[1] == "on")
+            out.write("indirect mode=%s\n" % ("on" if m.indirect else "off"))
+
+        elif cmd == "storage":
+            granted = sum(len(rs) for rs in m.grants.values())
+            matrix_cells = m.S * m.O * len(m.rights)
+            out.write("storage subjects=%d objects=%d rights=%d granted=%d "
+                      "acl_entries=%d cap_entries=%d matrix_cells=%d\n"
+                      % (m.S, m.O, len(m.rights), granted,
+                         granted, granted, matrix_cells))
+
+        elif cmd == "counters":
+            out.write("counters acl_ops=%d cap_ops=%d\n" % (m.acl_ops, m.cap_ops))
+
+        elif cmd == "reset_counters":
+            m.acl_ops = m.cap_ops = 0
+
+        else:
+            sys.stderr.write("accessmatrix: unknown command '%s'\n" % cmd)
+    return 0
+
+
+def main(argv):
+    if len(argv) != 2:
+        sys.stderr.write("usage: accessmatrix <script-file|->\n")
+        return 2
+    if argv[1] == "-":
+        return run(sys.stdin, sys.stdout)
+    with open(argv[1]) as f:
+        return run(f, sys.stdout)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

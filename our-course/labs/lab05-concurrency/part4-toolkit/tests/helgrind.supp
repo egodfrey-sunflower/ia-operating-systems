@@ -1,0 +1,43 @@
+# helgrind.supp -- two suppressions for a helgrind/glibc disagreement, not
+# for anything in your code.
+#
+# glibc 2.34 and later implement pthread_cond_wait with an internal reference
+# count that it manipulates with futex operations while the caller's mutex is
+# not held. helgrind models the older implementation, sees those operations,
+# and reports
+#
+#     pthread_cond_{signal,broadcast}: associated lock is not held by calling
+#     thread
+#
+# with a stack whose top frames are inside glibc's __pthread_cond_wait_common
+# -- that is, inside pthread_cond_wait, on the way IN, before any of your code
+# has done anything. A correct semaphore produces several of these per
+# run and there is nothing to fix.
+#
+# Both suppressions require __pthread_cond_wait_common to be on the stack, so
+# they are narrow. The mistake they could plausibly hide -- calling
+# pthread_cond_signal without holding the mutex -- produces the same message
+# from a completely different stack, with pthread_cond_signal and your
+# msem_post or msem_wait on it and no __pthread_cond_wait_common
+# anywhere, and is still reported.
+# That was checked by building a version that signals outside the mutex and
+# confirming helgrind still fails it with these suppressions loaded.
+#
+# If your helgrind ever stops emitting these, nothing breaks: a suppression
+# that matches nothing costs nothing.
+
+{
+   glibc-condvar-internal-refcount-Misc
+   Helgrind:Misc
+   ...
+   fun:__pthread_cond_wait_common
+   ...
+}
+
+{
+   glibc-condvar-internal-refcount-Dubious
+   Helgrind:Dubious
+   ...
+   fun:__pthread_cond_wait_common
+   ...
+}

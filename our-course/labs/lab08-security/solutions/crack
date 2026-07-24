@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+# crack -- Lab 8 Part 1: a dictionary attack on a stolen store.  REFERENCE.
+#
+#   crack <storefile> <wordlist>
+#
+# Given a store you generated and a wordlist, recover every password that is in
+# the wordlist, and report how much WORK it took -- not just how long.
+#
+# The work is counted as `hash_ops`: the number of KDF evaluations performed.
+# This is the deterministic heart of the salting lesson, and it does not depend
+# on the attacker's hardware:
+#
+#   * Against an UNSALTED store the attacker hashes each of the W words ONCE,
+#     into a digest->word table, and then looks every user up in that table for
+#     free.  hash_ops = W, no matter how many users N there are.
+#   * Against a SALTED (or slow) store every user has a different salt, so the
+#     table cannot be shared: the attacker must re-hash all W words for each of
+#     the N users.  hash_ops = W * N.
+#
+# So salting does not make one password harder to crack -- it makes N passwords
+# cost N times as much.  Wall-clock time is reported too (rate = hash_ops/sec)
+# but it is hardware-dependent and only rubric-marked; hash_ops is the number to
+# reason about.
+#
+# This cracker scans the whole wordlist for every salted user (it does not stop
+# at the first hit), so hash_ops is a clean W or W*N regardless of which
+# passwords happen to be present.
+
+import hashlib
+import sys
+import time
+
+MAX_WORDS = 200000      # cap the wordlist so a stray huge file cannot run away
+
+
+def kdf(scheme, cost, salt, password):
+    pw = password.encode("utf-8")
+    if scheme == "unsalted":
+        return hashlib.sha256(pw).hexdigest()
+    if scheme == "salted":
+        return hashlib.sha256(salt + pw).hexdigest()
+    if scheme == "slow":
+        return hashlib.pbkdf2_hmac("sha256", pw, salt, cost).hex()
+    raise ValueError("unknown scheme: %s" % scheme)
+
+
+def read_store(path):
+    records = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            user, scheme, cost, salt_hex, hash_hex = line.split()
+            salt = b"" if salt_hex == "-" else bytes.fromhex(salt_hex)
+            records.append({"user": user, "scheme": scheme, "cost": int(cost),
+                            "salt": salt, "hash": hash_hex})
+    return records
+
+
+def load_words(path):
+    words = []
+    with open(path) as f:
+        for line in f:
+            w = line.rstrip("\n")
+            if w:
+                words.append(w)
+            if len(words) >= MAX_WORDS:
+                sys.stderr.write("crack: wordlist capped at %d words\n" % MAX_WORDS)
+                break
+    return words
+
+
+def main(argv):
+    if len(argv) != 3:
+        sys.stderr.write("usage: crack <storefile> <wordlist>\n")
+        return 2
+    records = read_store(argv[1])
+    words = load_words(argv[2])
+    W = len(words)
+
+    unsalted = [r for r in records if r["scheme"] == "unsalted"]
+    salted = [r for r in records if r["scheme"] in ("salted", "slow")]
+
+    cracked = {}        # user -> word
+    hash_ops = 0
+    t0 = time.perf_counter()
+
+    # Unsalted users share ONE table: hash every word once, then look up.
+    if unsalted:
+        table = {}
+        for w in words:
+            table[kdf("unsalted", 0, b"", w)] = w
+            hash_ops += 1
+        for r in unsalted:
+            if r["hash"] in table:
+                cracked[r["user"]] = table[r["hash"]]
+
+    # Salted/slow users each need their own full pass -- no sharing possible.
+    for r in salted:
+        for w in words:
+            h = kdf(r["scheme"], r["cost"], r["salt"], w)
+            hash_ops += 1
+            if h == r["hash"]:
+                cracked[r["user"]] = w
+    dt = time.perf_counter() - t0
+
+    for user in sorted(cracked):
+        print("cracked user=%s password=%s" % (user, cracked[user]))
+    rate = (hash_ops / dt) if dt > 0 else 0.0
+    print("crack recovered=%d users=%d words=%d hash_ops=%d seconds=%.4f rate=%.0f"
+          % (len(cracked), len(records), W, hash_ops, dt, rate))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

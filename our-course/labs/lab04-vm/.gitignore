@@ -1,0 +1,4 @@
+# Working xv6 trees belong outside the course tree; setup.sh puts them
+# wherever you say. These are what turns up if you point it here anyway.
+__pycache__/
+*.pyc

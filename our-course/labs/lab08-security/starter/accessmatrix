@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+# accessmatrix -- Lab 8 Parts 2 & 3: Lampson's access matrix and its two
+# projections, plus revocation both ways.  STARTER.
+#
+# The matrix has subjects (rows), objects (columns) and a set of rights per
+# cell.  Keep ONE underlying structure -- here `grants[(s,o)] = {rights}` -- and
+# make the two classical representations PROJECTIONS of it, computed on demand:
+#
+#   acl(o)     -- the column: for a fixed object, who holds what.  (ACLs.)
+#   caplist(s) -- the row:    for a fixed subject, what it holds.   (Capabilities.)
+#
+# and `check(s,o,r)` reads the cell directly.  The whole point of Part 2 is that
+# both projections are DERIVED from the same grants and so cannot disagree with
+# each other or with check.  If you keep two separate structures and try to hold
+# them in step by hand, the property test WILL find the drift.  Do not.
+#
+# It reads a command script from a file argument, or '-' for stdin:
+#
+#   init <S> <O> <rights>     e.g.  init 6 6 rwx
+#   grant <s> <o> <r>
+#   check <s> <o> <r>
+#   acl <o>                   print the column
+#   caplist <s>               print the row
+#   revoke_subject <s> <r>    remove right r from subject s for EVERY object
+#   revoke_object  <o> <r>    remove right r from object o for EVERY subject
+#   indirect on|off           enable the indirection layer for object revocation
+#   storage                   print the storage cost of each representation
+#   counters                  print cumulative operation counters
+#   reset_counters
+#
+# The output lines below are a fixed contract; keep them exactly.  TODOs mark
+# what you implement.
+
+import sys
+
+
+class Matrix:
+    def __init__(self):
+        self.S = 0
+        self.O = 0
+        self.rights = ""
+        self.grants = {}          # (s, o) -> set of right chars  (the ONE structure)
+        self.indirect = False
+        self.invalid = set()      # (o, r) invalidated via the indirection layer
+        self.acl_ops = 0
+        self.cap_ops = 0
+
+    def has(self, s, o, r):
+        """True iff subject s holds right r on object o (respecting indirection)."""
+        if r not in self.grants.get((s, o), ()):
+            return False
+        if self.indirect and (o, r) in self.invalid:
+            return False
+        return True
+
+    def acl(self, o):
+        """The column of object o: [(s, rights-string), ...] sorted by subject.
+
+        TODO (Part 2): DERIVE this from self.grants -- for each subject, the
+        rights it holds on o (use self.has so indirection is respected).  Return
+        only subjects that hold at least one right.
+        """
+        _ = o
+        return []                 # TODO
+
+    def caplist(self, s):
+        """The row of subject s: [(o, rights-string), ...] sorted by object.
+
+        TODO (Part 2): DERIVE this from self.grants, the mirror of acl().
+        """
+        _ = s
+        return []                 # TODO
+
+
+def run(script, out):
+    m = Matrix()
+    for raw in script:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        tok = line.split()
+        cmd = tok[0]
+
+        if cmd == "init":
+            m.S, m.O, m.rights = int(tok[1]), int(tok[2]), tok[3]
+            m.grants = {}
+            m.invalid = set()
+            m.indirect = False
+            m.acl_ops = m.cap_ops = 0
+
+        elif cmd == "grant":
+            s, o, r = int(tok[1]), int(tok[2]), tok[3]
+            m.grants.setdefault((s, o), set()).add(r)
+
+        elif cmd == "check":
+            s, o, r = int(tok[1]), int(tok[2]), tok[3]
+            out.write("check s=%d o=%d r=%s = %s\n"
+                      % (s, o, r, "yes" if m.has(s, o, r) else "no"))
+
+        elif cmd == "acl":
+            o = int(tok[1])
+            body = " ".join("%d:%s" % (s, rs) for s, rs in m.acl(o))
+            out.write("acl o=%d : %s\n" % (o, body))
+
+        elif cmd == "caplist":
+            s = int(tok[1])
+            body = " ".join("%d:%s" % (o, rs) for o, rs in m.caplist(s))
+            out.write("caplist s=%d : %s\n" % (s, body))
+
+        elif cmd == "revoke_subject":
+            # Remove right r from subject s across ALL objects.
+            # TODO (Part 3): actually remove it from grants, and report the work.
+            #   ACL rep: s is scattered across every object's list -> acl_ops = O.
+            #   Capability rep: s's rights are one row            -> cap_ops = 1.
+            s, r = int(tok[1]), tok[2]
+            acl_ops = 0           # TODO: number of objects
+            cap_ops = 0           # TODO: 1
+            # TODO: remove r from grants[(s, o)] for every object o
+            m.acl_ops += acl_ops
+            m.cap_ops += cap_ops
+            out.write("revoke_subject s=%d r=%s acl_ops=%d cap_ops=%d\n"
+                      % (s, r, acl_ops, cap_ops))
+
+        elif cmd == "revoke_object":
+            # Remove right r from object o across ALL subjects.
+            # TODO (Part 3): actually remove it, and report the work.
+            #   ACL rep: o is one list                    -> acl_ops = 1.
+            #   Capability rep: caps for o are scattered   -> cap_ops = S ...
+            #     UNLESS indirection is on, when invalidating ONE entry revokes
+            #     for everyone at cost cap_ops = 1 (and self.has must honour it).
+            o, r = int(tok[1]), tok[2]
+            acl_ops = 0           # TODO
+            cap_ops = 0           # TODO
+            # TODO: if m.indirect, add (o, r) to m.invalid; else remove from grants
+            m.acl_ops += acl_ops
+            m.cap_ops += cap_ops
+            out.write("revoke_object o=%d r=%s acl_ops=%d cap_ops=%d\n"
+                      % (o, r, acl_ops, cap_ops))
+
+        elif cmd == "indirect":
+            m.indirect = (tok[1] == "on")
+            out.write("indirect mode=%s\n" % ("on" if m.indirect else "off"))
+
+        elif cmd == "storage":
+            # TODO (Part 2): granted = total number of granted (s,o,r) triples.
+            #   Each list representation stores one entry per triple (acl_entries
+            #   = cap_entries = granted); the full matrix stores S*O*R cells
+            #   regardless.  That gap -- lists O(granted) vs matrix O(S*O*R) -- is
+            #   the storage lesson for a sparse matrix.
+            granted = 0           # TODO
+            matrix_cells = m.S * m.O * len(m.rights)
+            out.write("storage subjects=%d objects=%d rights=%d granted=%d "
+                      "acl_entries=%d cap_entries=%d matrix_cells=%d\n"
+                      % (m.S, m.O, len(m.rights), granted,
+                         granted, granted, matrix_cells))
+
+        elif cmd == "counters":
+            out.write("counters acl_ops=%d cap_ops=%d\n" % (m.acl_ops, m.cap_ops))
+
+        elif cmd == "reset_counters":
+            m.acl_ops = m.cap_ops = 0
+
+        else:
+            sys.stderr.write("accessmatrix: unknown command '%s'\n" % cmd)
+    return 0
+
+
+def main(argv):
+    if len(argv) != 2:
+        sys.stderr.write("usage: accessmatrix <script-file|->\n")
+        return 2
+    if argv[1] == "-":
+        return run(sys.stdin, sys.stdout)
+    with open(argv[1]) as f:
+        return run(f, sys.stdout)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

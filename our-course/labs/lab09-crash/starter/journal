@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+# journal -- Lab 9 Parts 3-5: drive the journaled file system.  GIVEN CODE,
+# complete: it is a thin command-line shell around YOUR wal.py and YOUR
+# blockdev.py.  The interesting work happens in those two files.
+#
+#   journal mkfs <image>
+#       build a fresh file system (through a plain fifo device).
+#
+#   journal workload <image> [mode=data|ordered] [dev=fifo|reorder]
+#                    [crash=<N>] [misorder=none|commit-first]
+#       run the graded workload W: four transactions, op t creating file f<t>
+#       with d_t blocks, d = (1, 2, 1, 3); block j of file t is filled with
+#       byte 64 + 8*t + j.  Each create runs between begin_op and end_op, so
+#       the ORDER of the structure writes inside it no longer matters -- that
+#       is the journal's whole point.  Prints, per completed operation:
+#           committed op=<t> seq=<t> installs=<cumulative installs>
+#       and at the end:
+#           done ops=4 mode=<m> installs=<N> barriers=<B>
+#       With crash=<N> the device stops at N installs; the tool prints
+#           CRASH installs=<N>
+#       and exits 3, leaving the image exactly as the platter had it.
+#
+#   journal recover <image> [crash=<N>]
+#       run mount-time recovery (wal.recover) on the image.  Prints
+#           recover replayed=<n> seq=<s>     (or `recover empty`)
+#           recover done installs=<i>
+#       and with crash=<N>, `CRASH installs=<N>` + exit 3, as above.
+#
+# Every output line above is a fixed contract; the autograder parses them.
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import xv6fs                     # noqa: E402
+import blockdev                  # noqa: E402
+import wal                       # noqa: E402
+
+WORKLOAD = [(1, 1), (2, 2), (3, 1), (4, 3)]     # (op t, data blocks d_t)
+
+
+def kv(args, key, default):
+    for a in args:
+        if a.startswith(key + "="):
+            return a.split("=", 1)[1]
+    return default
+
+
+def create(j, t, d):
+    """One allocating create, through device object `j`.  Identical structure
+    writers to Part 2's -- only the device underneath differs."""
+    ino = xv6fs.find_free_inode(j)
+    blocks = xv6fs.find_free_blocks(j, d)
+    xv6fs.dirent_add(j, "f%d" % t, ino)
+    dino = xv6fs.Dinode(type=xv6fs.T_FILE, nlink=1, size=d * xv6fs.BSIZE)
+    for i, b in enumerate(blocks):
+        dino.addrs[i] = b
+    xv6fs.write_inode(j, ino, dino)
+    xv6fs.bitmap_mark(j, blocks)
+    for jj, b in enumerate(blocks):
+        j.write_data(b, xv6fs.fill_pattern(t, jj))
+
+
+def main(argv):
+    if len(argv) < 3:
+        sys.stderr.write("usage: journal mkfs|workload|recover <image> [k=v...]\n")
+        return 2
+    cmd, image, rest = argv[1], argv[2], argv[3:]
+
+    if cmd == "mkfs":
+        dev = blockdev.BlockDev(image, nblocks=xv6fs.FSSIZE)
+        xv6fs.mkfs(dev)
+        print("mkfs ok size=%d logstart=%d inodestart=%d bmapstart=%d firstdata=%d"
+              % (xv6fs.FSSIZE, xv6fs.LOGSTART, xv6fs.INODESTART,
+                 xv6fs.BMAPSTART, xv6fs.FIRSTDATA))
+        return 0
+
+    crash = kv(rest, "crash", None)
+    crash = int(crash) if crash is not None else None
+
+    if cmd == "workload":
+        mode = kv(rest, "mode", "data")
+        devmode = kv(rest, "dev", "fifo")
+        misorder = kv(rest, "misorder", "none")
+        dev = blockdev.BlockDev(image, mode=devmode, crash_after=crash)
+        j = wal.Journal(dev, mode=mode, misorder=misorder)
+        try:
+            for t, d in WORKLOAD:
+                j.begin_op()
+                create(j, t, d)
+                j.end_op()
+                print("committed op=%d seq=%d installs=%d" % (t, t, dev.installs))
+            print("done ops=%d mode=%s installs=%d barriers=%d"
+                  % (len(WORKLOAD), mode, dev.installs, dev.barriers))
+        except blockdev.Crash as c:
+            print("CRASH installs=%s" % c.args[0])
+            return 3
+        return 0
+
+    if cmd == "recover":
+        dev = blockdev.BlockDev(image, crash_after=crash)
+        try:
+            replayed, seq = wal.recover(dev)
+            if replayed:
+                print("recover replayed=%d seq=%d" % (replayed, seq))
+            else:
+                print("recover empty")
+            print("recover done installs=%d" % dev.installs)
+        except blockdev.Crash as c:
+            print("CRASH installs=%s" % c.args[0])
+            return 3
+        return 0
+
+    sys.stderr.write("journal: unknown command '%s'\n" % cmd)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

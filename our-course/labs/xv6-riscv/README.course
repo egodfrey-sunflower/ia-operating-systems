@@ -1,0 +1,16 @@
+This is a pristine, pinned checkout of xv6-riscv from
+https://github.com/mit-pdos/xv6-riscv at tag **xv6-riscv-rev5** (upstream
+commit 7d7adbb1b0acbd67c9766a20d0f9900fef2789fa), the revision the xv6 book
+edition this course cites was written against. To re-fetch it exactly:
+`git clone https://github.com/mit-pdos/xv6-riscv && git -C xv6-riscv checkout xv6-riscv-rev5`.
+
+**Never edit this tree.** Each kernel lab copies it; the copy is what you
+change. Keeping the vendored tree pristine is what makes "start again from a
+clean kernel" a one-line operation, and what keeps every lab's line references
+meaningful.
+
+The upstream default branch has moved on since rev5 and will keep moving. One
+rename already visible there: the kernel's print routine, `printf()` in
+`kernel/printf.c` at rev5, is `printk()` in `kernel/printk.c` on later commits.
+The course's chapter, section and symbol references all follow **rev5** — this
+tree — not upstream HEAD.

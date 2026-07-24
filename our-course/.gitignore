@@ -1,0 +1,3 @@
+# Python bytecode caches from lab test harnesses
+__pycache__/
+*.pyc
